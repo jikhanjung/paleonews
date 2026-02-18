@@ -13,6 +13,9 @@ dependencies = [
     "python-dotenv",
 ]
 
+[project.scripts]
+paleonews = "paleonews.__main__:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest",
