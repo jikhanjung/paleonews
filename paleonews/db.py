@@ -34,6 +34,20 @@ class Database:
                 sent_at     TEXT NOT NULL,
                 status      TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS pipeline_runs (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                started_at  TEXT NOT NULL,
+                finished_at TEXT,
+                fetched     INTEGER DEFAULT 0,
+                new_articles INTEGER DEFAULT 0,
+                relevant    INTEGER DEFAULT 0,
+                crawled     INTEGER DEFAULT 0,
+                summarized  INTEGER DEFAULT 0,
+                sent        INTEGER DEFAULT 0,
+                errors      TEXT,
+                status      TEXT NOT NULL DEFAULT 'running'
+            );
         """)
         self.conn.commit()
         # Migrate: add body column if missing (for existing DBs)
@@ -122,6 +136,51 @@ class Database:
             (body, article_id),
         )
         self.conn.commit()
+
+    def start_run(self) -> int:
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = self.conn.execute(
+            "INSERT INTO pipeline_runs (started_at, status) VALUES (?, 'running')",
+            (now,),
+        )
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def finish_run(self, run_id: int, **kwargs):
+        now = datetime.now(timezone.utc).isoformat()
+        errors = kwargs.pop("errors", None)
+        sets = ["finished_at = ?", "status = ?"]
+        vals = [now, "error" if errors else "success"]
+        if errors:
+            sets.append("errors = ?")
+            vals.append("\n".join(errors))
+        for key in ("fetched", "new_articles", "relevant", "crawled", "summarized", "sent"):
+            if key in kwargs:
+                sets.append(f"{key} = ?")
+                vals.append(kwargs[key])
+        vals.append(run_id)
+        self.conn.execute(
+            f"UPDATE pipeline_runs SET {', '.join(sets)} WHERE id = ?", vals,
+        )
+        self.conn.commit()
+
+    def get_recent_runs(self, limit: int = 5) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM pipeline_runs ORDER BY id DESC LIMIT ?", (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_source_stats(self) -> list[dict]:
+        rows = self.conn.execute(
+            """SELECT source,
+                      COUNT(*) as total,
+                      SUM(CASE WHEN is_relevant = 1 THEN 1 ELSE 0 END) as relevant,
+                      SUM(CASE WHEN summary_ko IS NOT NULL THEN 1 ELSE 0 END) as summarized
+               FROM articles
+               GROUP BY source
+               ORDER BY total DESC"""
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def get_stats(self) -> dict:
         total = self.conn.execute("SELECT COUNT(*) FROM articles").fetchone()[0]

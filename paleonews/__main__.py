@@ -1,9 +1,11 @@
 import argparse
 import asyncio
 import logging
+import logging.handlers
 import os
 import sys
 from datetime import date
+from pathlib import Path
 
 from anthropic import Anthropic
 
@@ -17,39 +19,70 @@ from .dispatcher.email import EmailDispatcher
 from .dispatcher.telegram import TelegramDispatcher
 from .dispatcher.webhook import WebhookDispatcher
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%H:%M:%S",
-)
 logger = logging.getLogger("paleonews")
 
 
-def cmd_fetch(db: Database, config: dict):
+def setup_logging(config: dict):
+    """Configure logging with console and optional file output."""
+    log_config = config.get("logging", {})
+    level_name = log_config.get("level", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+
+    fmt = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    root = logging.getLogger()
+    root.setLevel(level)
+
+    # Console handler
+    console = logging.StreamHandler()
+    console.setFormatter(fmt)
+    root.addHandler(console)
+
+    # File handler (with rotation)
+    log_file = log_config.get("file")
+    if log_file:
+        path = Path(log_file)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        max_bytes = log_config.get("max_bytes", 5 * 1024 * 1024)  # 5MB
+        backup_count = log_config.get("backup_count", 3)
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8",
+        )
+        file_handler.setFormatter(fmt)
+        root.addHandler(file_handler)
+
+
+def cmd_fetch(db: Database, config: dict) -> tuple[int, int]:
     sources = load_sources(config["sources_file"])
     articles = fetch_all(sources)
     new_count = db.save_articles(articles)
     print(f"수집: {len(articles)}건, 신규: {new_count}건")
+    return len(articles), new_count
 
 
-def cmd_filter(db: Database, config: dict):
+def cmd_filter(db: Database, config: dict) -> int:
     llm_enabled = config.get("filter", {}).get("llm_filter", {}).get("enabled", False)
     client = Anthropic() if llm_enabled else None
     relevant = filter_articles(db, config, llm_client=client)
     print(f"고생물학 관련: {relevant}건")
+    return relevant
 
 
-def cmd_crawl(db: Database, config: dict):
+def cmd_crawl(db: Database, config: dict) -> int:
     max_crawl = config.get("crawler", {}).get("max_per_run", 20)
     crawled = crawl_articles(db, max_crawl=max_crawl)
     print(f"본문 크롤링: {crawled}건")
+    return crawled
 
 
-def cmd_summarize(db: Database, config: dict):
+def cmd_summarize(db: Database, config: dict) -> int:
     unsummarized = db.get_unsummarized()
     if not unsummarized:
         print("요약할 기사가 없습니다.")
-        return
+        return 0
 
     model = config.get("summarizer", {}).get("model", "claude-sonnet-4-20250514")
     max_articles = config.get("summarizer", {}).get("max_articles_per_run", 20)
@@ -65,6 +98,7 @@ def cmd_summarize(db: Database, config: dict):
             logger.exception("Failed to summarize article %d", article["id"])
 
     print(f"요약 완료: {len(targets)}건")
+    return len(targets)
 
 
 def cmd_send(db: Database, config: dict):
@@ -146,12 +180,84 @@ def cmd_send(db: Database, config: dict):
         print("전송할 기사가 없거나 활성화된 채널이 없습니다.")
 
 
-def cmd_status(db: Database):
+def cmd_sources(config: dict, args):
+    sources_file = config["sources_file"]
+    path = Path(sources_file)
+
+    if args.sources_command == "list" or args.sources_command is None:
+        if not path.exists():
+            print(f"{sources_file}이 없습니다.")
+            return
+        sources = [line.strip() for line in path.read_text().strip().splitlines()
+                   if line.strip() and not line.startswith("#")]
+        print(f"피드 소스 ({len(sources)}개):")
+        for i, url in enumerate(sources, 1):
+            print(f"  {i}. {url}")
+
+    elif args.sources_command == "add":
+        url = args.url.strip()
+        # Check for duplicates
+        existing = []
+        if path.exists():
+            existing = [line.strip() for line in path.read_text().strip().splitlines()
+                       if line.strip() and not line.startswith("#")]
+        if url in existing:
+            print(f"이미 등록된 소스입니다: {url}")
+            return
+        with open(path, "a") as f:
+            f.write(f"\n{url}\n")
+        print(f"소스 추가: {url}")
+
+    elif args.sources_command == "remove":
+        url = args.url.strip()
+        if not path.exists():
+            print(f"{sources_file}이 없습니다.")
+            return
+        lines = path.read_text().splitlines()
+        new_lines = [line for line in lines if line.strip() != url]
+        if len(new_lines) == len(lines):
+            print(f"해당 소스를 찾을 수 없습니다: {url}")
+            return
+        path.write_text("\n".join(new_lines) + "\n")
+        print(f"소스 삭제: {url}")
+
+
+def cmd_status(db: Database, verbose: bool = False):
     stats = db.get_stats()
     print(f"전체 기사:   {stats['total']}건")
     print(f"관련 기사:   {stats['relevant']}건")
     print(f"요약 완료:   {stats['summarized']}건")
     print(f"전송 완료:   {stats['sent']}건")
+
+    if not verbose:
+        return
+
+    # 출처별 통계
+    source_stats = db.get_source_stats()
+    if source_stats:
+        print(f"\n--- 출처별 통계 ---")
+        print(f"{'출처':<40} {'전체':>5} {'관련':>5} {'요약':>5}")
+        print("-" * 58)
+        for s in source_stats:
+            name = (s["source"] or "Unknown")[:38]
+            print(f"{name:<40} {s['total']:>5} {s['relevant']:>5} {s['summarized']:>5}")
+
+    # 최근 실행 이력
+    runs = db.get_recent_runs(5)
+    if runs:
+        print(f"\n--- 최근 실행 이력 ---")
+        for r in runs:
+            started = r["started_at"][:19].replace("T", " ")
+            status = r["status"]
+            print(
+                f"  {started}  [{status}]  "
+                f"수집:{r['fetched']} 신규:{r['new_articles']} "
+                f"관련:{r['relevant']} 크롤:{r['crawled']} "
+                f"요약:{r['summarized']} 전송:{r['sent']}"
+            )
+            if r.get("errors"):
+                for err in r["errors"].split("\n"):
+                    print(f"    ⚠ {err}")
 
 
 def main():
@@ -167,7 +273,17 @@ def main():
     subparsers.add_parser("crawl", help="Crawl article body text")
     subparsers.add_parser("summarize", help="Summarize articles only")
     subparsers.add_parser("send", help="Send briefing only")
-    subparsers.add_parser("status", help="Show database statistics")
+    status_parser = subparsers.add_parser("status", help="Show database statistics")
+    status_parser.add_argument("-v", "--verbose", action="store_true", help="Show detailed stats")
+
+    # Feed source management
+    sources_parser = subparsers.add_parser("sources", help="Manage RSS feed sources")
+    sources_sub = sources_parser.add_subparsers(dest="sources_command")
+    sources_sub.add_parser("list", help="List all feed sources")
+    add_parser = sources_sub.add_parser("add", help="Add a feed source")
+    add_parser.add_argument("url", help="RSS feed URL to add")
+    remove_parser = sources_sub.add_parser("remove", help="Remove a feed source")
+    remove_parser.add_argument("url", help="RSS feed URL to remove")
 
     args = parser.parse_args()
 
@@ -176,6 +292,7 @@ def main():
         sys.exit(0)
 
     config = load_config()
+    setup_logging(config)
     db = Database(config.get("db_path", "paleonews.db"))
     db.init_tables()
 
@@ -186,7 +303,8 @@ def main():
             "crawl": lambda: cmd_crawl(db, config),
             "summarize": lambda: cmd_summarize(db, config),
             "send": lambda: cmd_send(db, config),
-            "status": lambda: cmd_status(db),
+            "status": lambda: cmd_status(db, verbose=getattr(args, "verbose", False)),
+            "sources": lambda: cmd_sources(config, args),
             "run": lambda: _run_pipeline(db, config),
         }
         commands[args.command]()
@@ -211,32 +329,36 @@ def _notify_admin(config: dict, errors: list[str]):
 
 
 def _run_pipeline(db: Database, config: dict):
+    run_id = db.start_run()
     errors = []
+    run_data = {"fetched": 0, "new_articles": 0, "relevant": 0, "crawled": 0, "summarized": 0, "sent": 0}
 
     print("=== 1/5 RSS 피드 수집 ===")
     try:
-        cmd_fetch(db, config)
+        fetched, new = cmd_fetch(db, config)
+        run_data["fetched"] = fetched
+        run_data["new_articles"] = new
     except Exception as e:
         logger.exception("Fetch failed")
         errors.append(f"수집 실패: {e}")
 
     print("\n=== 2/5 필터링 ===")
     try:
-        cmd_filter(db, config)
+        run_data["relevant"] = cmd_filter(db, config)
     except Exception as e:
         logger.exception("Filter failed")
         errors.append(f"필터링 실패: {e}")
 
     print("\n=== 3/5 본문 크롤링 ===")
     try:
-        cmd_crawl(db, config)
+        run_data["crawled"] = cmd_crawl(db, config)
     except Exception as e:
         logger.exception("Crawl failed")
         errors.append(f"크롤링 실패: {e}")
 
     print("\n=== 4/5 한국어 요약 ===")
     try:
-        cmd_summarize(db, config)
+        run_data["summarized"] = cmd_summarize(db, config)
     except Exception as e:
         logger.exception("Summarize failed")
         errors.append(f"요약 실패: {e}")
@@ -248,8 +370,14 @@ def _run_pipeline(db: Database, config: dict):
         logger.exception("Send failed")
         errors.append(f"전송 실패: {e}")
 
+    # Record sent count from dispatches
+    stats = db.get_stats()
+    run_data["sent"] = stats["sent"]
+
     print("\n=== 완료 ===")
     cmd_status(db)
+
+    db.finish_run(run_id, errors=errors if errors else None, **run_data)
 
     if errors:
         print(f"\n⚠️ {len(errors)}건의 오류 발생")

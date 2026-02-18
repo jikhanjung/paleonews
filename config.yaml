@@ -1,3 +1,9 @@
+logging:
+  level: "INFO"
+  file: "logs/paleonews.log"
+  max_bytes: 5242880    # 5MB
+  backup_count: 3
+
 sources_file: "sources.txt"
 db_path: "paleonews.db"
 
