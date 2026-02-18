@@ -28,12 +28,13 @@ sources.txt → Fetcher → DB → Filter(키워드+LLM) → Crawler(본문) →
 ## Key Files
 
 - `paleonews/__main__.py` — CLI 엔트리포인트, 파이프라인 통합
-- `paleonews/db.py` — SQLite DB (articles, dispatches 테이블)
+- `paleonews/db.py` — SQLite DB (articles, dispatches, users 테이블)
 - `paleonews/fetcher.py` — RSS 피드 수집, Article dataclass
-- `paleonews/filter.py` — 키워드 접두사 매칭 + LLM 2차 필터
+- `paleonews/filter.py` — 키워드 접두사 매칭 + LLM 2차 필터 + 사용자별 키워드 필터
 - `paleonews/crawler.py` — 기사 본문 크롤링 (readability)
 - `paleonews/summarizer.py` — Claude API 한국어 요약, 브리핑 생성
 - `paleonews/dispatcher/` — Telegram, Email, Webhook(Slack/Discord)
+- `paleonews/bot.py` — Telegram 봇 데몬 (/start, /stop, /keywords)
 - `config.yaml` — 전체 설정 (피드, 키워드, 모델, 채널)
 - `sources.txt` — RSS 피드 URL 목록 (10개)
 
@@ -45,8 +46,15 @@ paleonews fetch        # RSS 수집
 paleonews filter       # 필터링
 paleonews crawl        # 본문 크롤링
 paleonews summarize    # 한국어 요약
-paleonews send         # 전송
+paleonews send         # 전송 (다중 사용자별)
 paleonews status       # DB 통계
+paleonews users list   # 사용자 목록
+paleonews users add <chat_id> [--name NAME] [--admin]
+paleonews users remove <chat_id>
+paleonews users keywords <chat_id> [keyword ...]  # * = 전체 수신
+paleonews users activate <chat_id>
+paleonews users deactivate <chat_id>
+paleonews bot          # Telegram 봇 데몬
 ```
 
 ## Development
@@ -66,6 +74,6 @@ paleonews status       # DB 통계
 ## Status
 
 - Phase 1 (MVP) 완료: 기본 파이프라인 동작
-- Phase 2 완료 (다중 사용자 제외): LLM 필터, 크롤링, 다중 채널, 에러 알림
-- Phase 2 보류: 다중 사용자 지원 (Telegram 봇 명령어 기반 구독/키워드 관리)
-- Phase 3 미착수: 로깅 체계화, 모니터링, 피드 소스 관리 CLI
+- Phase 2 완료: LLM 필터, 크롤링, 다중 채널, 에러 알림
+- Phase 3 완료: 로깅 체계화, 모니터링, 피드 소스 관리 CLI
+- Phase 4 완료: 다중 사용자 지원 (users 테이블, 사용자별 키워드 필터, CLI 관리, Telegram 봇 데몬)

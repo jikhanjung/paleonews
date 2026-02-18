@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from datetime import datetime, timezone
 
@@ -9,6 +10,7 @@ class Database:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
+        self.conn.execute("PRAGMA busy_timeout=5000")
 
     def init_tables(self):
         self.conn.executescript("""
@@ -32,7 +34,8 @@ class Database:
                 article_id  INTEGER NOT NULL REFERENCES articles(id),
                 channel     TEXT NOT NULL,
                 sent_at     TEXT NOT NULL,
-                status      TEXT NOT NULL
+                status      TEXT NOT NULL,
+                user_id     INTEGER REFERENCES users(id)
             );
 
             CREATE TABLE IF NOT EXISTS pipeline_runs (
@@ -48,13 +51,122 @@ class Database:
                 errors      TEXT,
                 status      TEXT NOT NULL DEFAULT 'running'
             );
+
+            CREATE TABLE IF NOT EXISTS users (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id      TEXT UNIQUE NOT NULL,
+                username     TEXT,
+                display_name TEXT,
+                is_active    BOOLEAN NOT NULL DEFAULT 1,
+                is_admin     BOOLEAN NOT NULL DEFAULT 0,
+                keywords     TEXT,
+                created_at   TEXT NOT NULL,
+                updated_at   TEXT NOT NULL
+            );
         """)
         self.conn.commit()
-        # Migrate: add body column if missing (for existing DBs)
-        columns = [row[1] for row in self.conn.execute("PRAGMA table_info(articles)")]
-        if "body" not in columns:
+        self._migrate()
+
+    def _migrate(self):
+        """Run schema migrations for existing DBs."""
+        # Migrate: add body column if missing
+        article_cols = [row[1] for row in self.conn.execute("PRAGMA table_info(articles)")]
+        if "body" not in article_cols:
             self.conn.execute("ALTER TABLE articles ADD COLUMN body TEXT")
             self.conn.commit()
+
+        # Migrate: add user_id column to dispatches if missing
+        dispatch_cols = [row[1] for row in self.conn.execute("PRAGMA table_info(dispatches)")]
+        if "user_id" not in dispatch_cols:
+            self.conn.execute("ALTER TABLE dispatches ADD COLUMN user_id INTEGER REFERENCES users(id)")
+            self.conn.commit()
+
+    def seed_admin(self, chat_id: str, username: str | None = None):
+        """Seed admin user from TELEGRAM_CHAT_ID. Backfills existing telegram dispatches."""
+        existing = self.get_user_by_chat_id(chat_id)
+        if existing:
+            if not existing["is_admin"]:
+                self.conn.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (existing["id"],))
+                self.conn.commit()
+            return existing["id"]
+
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = self.conn.execute(
+            """INSERT INTO users (chat_id, username, display_name, is_active, is_admin, keywords, created_at, updated_at)
+               VALUES (?, ?, ?, 1, 1, NULL, ?, ?)""",
+            (chat_id, username, username, now, now),
+        )
+        self.conn.commit()
+        admin_id = cursor.lastrowid
+
+        # Backfill existing telegram dispatches with admin user_id
+        self.conn.execute(
+            "UPDATE dispatches SET user_id = ? WHERE channel = 'telegram' AND user_id IS NULL",
+            (admin_id,),
+        )
+        self.conn.commit()
+        return admin_id
+
+    # --- User CRUD ---
+
+    def add_user(self, chat_id: str, username: str | None = None,
+                 display_name: str | None = None, is_admin: bool = False) -> int:
+        """Add a new user. Returns user id."""
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = self.conn.execute(
+            """INSERT INTO users (chat_id, username, display_name, is_active, is_admin, keywords, created_at, updated_at)
+               VALUES (?, ?, ?, 1, ?, NULL, ?, ?)""",
+            (chat_id, username, display_name or username, is_admin, now, now),
+        )
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def get_user_by_chat_id(self, chat_id: str) -> dict | None:
+        row = self.conn.execute("SELECT * FROM users WHERE chat_id = ?", (chat_id,)).fetchone()
+        return dict(row) if row else None
+
+    def get_user(self, user_id: int) -> dict | None:
+        row = self.conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        return dict(row) if row else None
+
+    def get_active_users(self) -> list[dict]:
+        rows = self.conn.execute("SELECT * FROM users WHERE is_active = 1").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_all_users(self) -> list[dict]:
+        rows = self.conn.execute("SELECT * FROM users ORDER BY id").fetchall()
+        return [dict(r) for r in rows]
+
+    def update_user_active(self, user_id: int, is_active: bool):
+        now = datetime.now(timezone.utc).isoformat()
+        self.conn.execute(
+            "UPDATE users SET is_active = ?, updated_at = ? WHERE id = ?",
+            (is_active, now, user_id),
+        )
+        self.conn.commit()
+
+    def update_user_keywords(self, user_id: int, keywords: list[str] | None):
+        """Set user keywords. None means receive all articles."""
+        now = datetime.now(timezone.utc).isoformat()
+        kw_json = json.dumps(keywords, ensure_ascii=False) if keywords is not None else None
+        self.conn.execute(
+            "UPDATE users SET keywords = ?, updated_at = ? WHERE id = ?",
+            (kw_json, now, user_id),
+        )
+        self.conn.commit()
+
+    def get_user_keywords(self, user_id: int) -> list[str] | None:
+        """Get user keywords. Returns None if user receives all articles."""
+        row = self.conn.execute("SELECT keywords FROM users WHERE id = ?", (user_id,)).fetchone()
+        if row is None or row["keywords"] is None:
+            return None
+        return json.loads(row["keywords"])
+
+    def remove_user(self, user_id: int):
+        self.conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        self.conn.commit()
+
+    # --- Article methods ---
 
     def save_articles(self, articles) -> int:
         """Save articles to DB. Returns count of newly inserted rows."""
@@ -110,17 +222,33 @@ class Database:
                  AND a.id NOT IN (
                      SELECT article_id FROM dispatches
                      WHERE channel = ? AND status = 'success'
+                       AND user_id IS NULL
                  )""",
             (channel,),
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def record_dispatch(self, article_id: int, channel: str, status: str):
+    def get_unsent_for_user(self, channel: str, user_id: int) -> list[dict]:
+        """Get articles not yet sent to a specific user on a channel."""
+        rows = self.conn.execute(
+            """SELECT a.* FROM articles a
+               WHERE a.is_relevant = 1
+                 AND a.summary_ko IS NOT NULL
+                 AND a.id NOT IN (
+                     SELECT article_id FROM dispatches
+                     WHERE channel = ? AND user_id = ? AND status = 'success'
+                 )""",
+            (channel, user_id),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def record_dispatch(self, article_id: int, channel: str, status: str,
+                        user_id: int | None = None):
         now = datetime.now(timezone.utc).isoformat()
         self.conn.execute(
-            """INSERT INTO dispatches (article_id, channel, sent_at, status)
-               VALUES (?, ?, ?, ?)""",
-            (article_id, channel, now, status),
+            """INSERT INTO dispatches (article_id, channel, sent_at, status, user_id)
+               VALUES (?, ?, ?, ?, ?)""",
+            (article_id, channel, now, status, user_id),
         )
         self.conn.commit()
 
@@ -136,6 +264,8 @@ class Database:
             (body, article_id),
         )
         self.conn.commit()
+
+    # --- Pipeline run methods ---
 
     def start_run(self) -> int:
         now = datetime.now(timezone.utc).isoformat()

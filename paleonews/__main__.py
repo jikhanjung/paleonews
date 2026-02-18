@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import json
 import logging
 import logging.handlers
 import os
@@ -13,7 +14,7 @@ from .config import load_config
 from .db import Database
 from .fetcher import fetch_all, load_sources
 from .crawler import crawl_articles
-from .filter import filter_articles
+from .filter import filter_articles, filter_articles_for_user
 from .summarizer import generate_briefing, summarize_article
 from .dispatcher.email import EmailDispatcher
 from .dispatcher.telegram import TelegramDispatcher
@@ -105,21 +106,55 @@ def cmd_send(db: Database, config: dict):
     channels_config = config.get("channels", {})
     sent_any = False
 
-    # Telegram
+    # Telegram — multi-user dispatch
     tg_config = channels_config.get("telegram", {})
     if tg_config.get("enabled", True):
         bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-        chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
-        if bot_token and chat_id:
-            unsent = db.get_unsent("telegram")
-            if unsent:
-                briefing = generate_briefing(unsent, date.today().isoformat())
+        if bot_token:
+            # Seed admin user if TELEGRAM_CHAT_ID is set
+            admin_chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+            if admin_chat_id:
+                db.seed_admin(admin_chat_id)
+
+            users = db.get_active_users()
+            if not users and admin_chat_id:
+                # Fallback: no users in DB yet, use env var directly
+                users = [{"id": None, "chat_id": admin_chat_id, "keywords": None}]
+
+            for user in users:
+                user_id = user["id"]
+                chat_id = user["chat_id"]
+
+                if user_id is not None:
+                    unsent = db.get_unsent_for_user("telegram", user_id)
+                else:
+                    unsent = db.get_unsent("telegram")
+
+                if not unsent:
+                    continue
+
+                # Apply per-user keyword filter
+                user_keywords = db.get_user_keywords(user_id) if user_id else None
+                filtered = filter_articles_for_user(unsent, user_keywords)
+
+                if not filtered:
+                    # Mark as sent even if filtered out, to avoid re-processing
+                    for a in unsent:
+                        db.record_dispatch(a["id"], "telegram", "filtered", user_id=user_id)
+                    continue
+
+                briefing = generate_briefing(filtered, date.today().isoformat())
                 dispatcher = TelegramDispatcher(bot_token, chat_id)
                 success = asyncio.run(dispatcher.send_briefing(briefing))
                 status = "success" if success else "failed"
+                for a in filtered:
+                    db.record_dispatch(a["id"], "telegram", status, user_id=user_id)
+                # Mark non-filtered articles as filtered
+                filtered_ids = {a["id"] for a in filtered}
                 for a in unsent:
-                    db.record_dispatch(a["id"], "telegram", status)
-                print(f"Telegram 전송 {'완료' if success else '실패'}: {len(unsent)}건")
+                    if a["id"] not in filtered_ids:
+                        db.record_dispatch(a["id"], "telegram", "filtered", user_id=user_id)
+                print(f"Telegram [{chat_id}] 전송 {'완료' if success else '실패'}: {len(filtered)}건")
                 sent_any = True
 
     # Email
@@ -178,6 +213,87 @@ def cmd_send(db: Database, config: dict):
 
     if not sent_any:
         print("전송할 기사가 없거나 활성화된 채널이 없습니다.")
+
+
+def cmd_users(db: Database, args):
+    """Manage users via CLI."""
+    sub = args.users_command
+
+    if sub == "list" or sub is None:
+        users = db.get_all_users()
+        if not users:
+            print("등록된 사용자가 없습니다.")
+            return
+        print(f"사용자 ({len(users)}명):")
+        for u in users:
+            status = "활성" if u["is_active"] else "비활성"
+            admin = " [관리자]" if u["is_admin"] else ""
+            kw = u["keywords"]
+            if kw:
+                kw_list = json.loads(kw)
+                kw_str = f" 키워드: {', '.join(kw_list)}"
+            else:
+                kw_str = " 키워드: 전체 수신"
+            print(f"  {u['id']}. chat_id={u['chat_id']} ({status}{admin}){kw_str}")
+
+    elif sub == "add":
+        chat_id = args.chat_id
+        existing = db.get_user_by_chat_id(chat_id)
+        if existing:
+            print(f"이미 등록된 사용자입니다: chat_id={chat_id}")
+            return
+        name = getattr(args, "name", None)
+        is_admin = getattr(args, "admin", False)
+        user_id = db.add_user(chat_id, username=name, is_admin=is_admin)
+        print(f"사용자 추가: id={user_id}, chat_id={chat_id}")
+
+    elif sub == "remove":
+        chat_id = args.chat_id
+        user = db.get_user_by_chat_id(chat_id)
+        if not user:
+            print(f"사용자를 찾을 수 없습니다: chat_id={chat_id}")
+            return
+        db.remove_user(user["id"])
+        print(f"사용자 삭제: chat_id={chat_id}")
+
+    elif sub == "keywords":
+        chat_id = args.chat_id
+        user = db.get_user_by_chat_id(chat_id)
+        if not user:
+            print(f"사용자를 찾을 수 없습니다: chat_id={chat_id}")
+            return
+        kw_input = getattr(args, "keywords_list", None)
+        if kw_input is None or kw_input == []:
+            # Show current keywords
+            kw = db.get_user_keywords(user["id"])
+            if kw is None:
+                print(f"chat_id={chat_id}: 전체 수신")
+            else:
+                print(f"chat_id={chat_id}: {', '.join(kw)}")
+        elif kw_input == ["*"]:
+            db.update_user_keywords(user["id"], None)
+            print(f"chat_id={chat_id}: 전체 수신으로 변경")
+        else:
+            db.update_user_keywords(user["id"], kw_input)
+            print(f"chat_id={chat_id}: 키워드 설정 → {', '.join(kw_input)}")
+
+    elif sub == "activate":
+        chat_id = args.chat_id
+        user = db.get_user_by_chat_id(chat_id)
+        if not user:
+            print(f"사용자를 찾을 수 없습니다: chat_id={chat_id}")
+            return
+        db.update_user_active(user["id"], True)
+        print(f"사용자 활성화: chat_id={chat_id}")
+
+    elif sub == "deactivate":
+        chat_id = args.chat_id
+        user = db.get_user_by_chat_id(chat_id)
+        if not user:
+            print(f"사용자를 찾을 수 없습니다: chat_id={chat_id}")
+            return
+        db.update_user_active(user["id"], False)
+        print(f"사용자 비활성화: chat_id={chat_id}")
 
 
 def cmd_sources(config: dict, args):
@@ -259,6 +375,13 @@ def cmd_status(db: Database, verbose: bool = False):
                 for err in r["errors"].split("\n"):
                     print(f"    ⚠ {err}")
 
+    # 사용자 통계
+    users = db.get_all_users()
+    if users:
+        active = sum(1 for u in users if u["is_active"])
+        print(f"\n--- 사용자 ---")
+        print(f"  전체: {len(users)}명, 활성: {active}명")
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -267,7 +390,7 @@ def main():
     )
     subparsers = parser.add_subparsers(dest="command")
 
-    subparsers.add_parser("run", help="Run full pipeline (fetch → filter → crawl → summarize → send)")
+    subparsers.add_parser("run", help="Run full pipeline (fetch -> filter -> crawl -> summarize -> send)")
     subparsers.add_parser("fetch", help="Fetch RSS feeds only")
     subparsers.add_parser("filter", help="Filter articles only")
     subparsers.add_parser("crawl", help="Crawl article body text")
@@ -285,6 +408,27 @@ def main():
     remove_parser = sources_sub.add_parser("remove", help="Remove a feed source")
     remove_parser.add_argument("url", help="RSS feed URL to remove")
 
+    # User management
+    users_parser = subparsers.add_parser("users", help="Manage subscribers")
+    users_sub = users_parser.add_subparsers(dest="users_command")
+    users_sub.add_parser("list", help="List all users")
+    user_add = users_sub.add_parser("add", help="Add a user")
+    user_add.add_argument("chat_id", help="Telegram chat ID")
+    user_add.add_argument("--name", help="Username / display name")
+    user_add.add_argument("--admin", action="store_true", help="Set as admin")
+    user_remove = users_sub.add_parser("remove", help="Remove a user")
+    user_remove.add_argument("chat_id", help="Telegram chat ID")
+    user_kw = users_sub.add_parser("keywords", help="Set user keywords (use * for all)")
+    user_kw.add_argument("chat_id", help="Telegram chat ID")
+    user_kw.add_argument("keywords_list", nargs="*", help="Keywords (omit to show, * for all)")
+    user_activate = users_sub.add_parser("activate", help="Activate a user")
+    user_activate.add_argument("chat_id", help="Telegram chat ID")
+    user_deactivate = users_sub.add_parser("deactivate", help="Deactivate a user")
+    user_deactivate.add_argument("chat_id", help="Telegram chat ID")
+
+    # Telegram bot daemon
+    subparsers.add_parser("bot", help="Run Telegram bot daemon")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -297,6 +441,11 @@ def main():
     db.init_tables()
 
     try:
+        if args.command == "bot":
+            from .bot import run_bot
+            run_bot(db, config)
+            return
+
         commands = {
             "fetch": lambda: cmd_fetch(db, config),
             "filter": lambda: cmd_filter(db, config),
@@ -305,6 +454,7 @@ def main():
             "send": lambda: cmd_send(db, config),
             "status": lambda: cmd_status(db, verbose=getattr(args, "verbose", False)),
             "sources": lambda: cmd_sources(config, args),
+            "users": lambda: cmd_users(db, args),
             "run": lambda: _run_pipeline(db, config),
         }
         commands[args.command]()

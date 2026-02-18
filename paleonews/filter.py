@@ -83,3 +83,19 @@ def filter_articles(db, config: dict, llm_client: Anthropic | None = None) -> in
         len(unfiltered), relevant_count, len(unfiltered) - relevant_count, llm_checked,
     )
     return relevant_count
+
+
+def filter_articles_for_user(articles: list[dict], user_keywords: list[str] | None) -> list[dict]:
+    """Filter articles by user's personal keywords. None keywords = receive all."""
+    if user_keywords is None:
+        return articles
+    if not user_keywords:
+        return []
+    return [
+        a for a in articles
+        if keyword_match(
+            a.get("title_ko", "") or a.get("title", "") or "",
+            a.get("summary_ko", "") or a.get("summary", "") or "",
+            user_keywords,
+        )
+    ]
