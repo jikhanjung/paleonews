@@ -1,0 +1,48 @@
+sources_file: "sources.txt"
+db_path: "paleonews.db"
+
+dedicated_feeds:
+  - "nature.com/subjects/palaeontology"
+  - "sciencedaily.com/rss/fossils"
+  - "phys.org/rss-feed/biology-news/paleontology"
+  - "wiley"
+  - "cambridge.org"
+  - "academic.oup.com"
+
+filter:
+  keywords:
+    - fossil
+    - dinosaur
+    - paleontology
+    - palaeontology
+    - paleobiology
+    - extinct
+    - extinction
+    - cretaceous
+    - jurassic
+    - triassic
+    - cambrian
+    - devonian
+    - permian
+    - cenozoic
+    - mesozoic
+    - paleozoic
+    - neanderthal
+    - hominin
+    - hominid
+    - mammoth
+    - pterosaur
+    - ichthyosaur
+    - ammonite
+    - trilobite
+    - megafauna
+    - stratigraphy
+    - taphonomy
+
+summarizer:
+  model: "claude-sonnet-4-20250514"
+  max_articles_per_run: 20
+
+telegram:
+  parse_mode: "HTML"
+  max_message_length: 4096
