@@ -18,16 +18,35 @@ ARTICLE_PROMPT = """\
 제목: (한국어 제목, 30자 이내)
 요약: (핵심 내용 2~3문장, 이 연구/발견이 왜 중요한지 포함)"""
 
+ARTICLE_PROMPT_WITH_BODY = """\
+아래 영문 기사를 한국어로 요약해주세요.
+
+제목: {title}
+본문: {body}
+출처: {source}
+
+다음 형식으로 정확히 답변하세요:
+제목: (한국어 제목, 30자 이내)
+요약: (핵심 내용 3~4문장, 이 연구/발견이 왜 중요한지 포함)"""
+
 
 def summarize_article(
     client: Anthropic, article: dict, model: str
 ) -> tuple[str, str]:
     """Summarize a single article. Returns (title_ko, summary_ko)."""
-    prompt = ARTICLE_PROMPT.format(
-        title=article.get("title", ""),
-        summary=article.get("summary", ""),
-        source=article.get("source", ""),
-    )
+    body = article.get("body")
+    if body and len(body) >= 100:
+        prompt = ARTICLE_PROMPT_WITH_BODY.format(
+            title=article.get("title", ""),
+            body=body,
+            source=article.get("source", ""),
+        )
+    else:
+        prompt = ARTICLE_PROMPT.format(
+            title=article.get("title", ""),
+            summary=article.get("summary", ""),
+            source=article.get("source", ""),
+        )
 
     response = client.messages.create(
         model=model,

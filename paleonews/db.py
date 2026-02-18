@@ -23,7 +23,8 @@ class Database:
                 fetched_at  TEXT NOT NULL,
                 is_relevant BOOLEAN,
                 summary_ko  TEXT,
-                title_ko    TEXT
+                title_ko    TEXT,
+                body        TEXT
             );
 
             CREATE TABLE IF NOT EXISTS dispatches (
@@ -35,6 +36,11 @@ class Database:
             );
         """)
         self.conn.commit()
+        # Migrate: add body column if missing (for existing DBs)
+        columns = [row[1] for row in self.conn.execute("PRAGMA table_info(articles)")]
+        if "body" not in columns:
+            self.conn.execute("ALTER TABLE articles ADD COLUMN body TEXT")
+            self.conn.commit()
 
     def save_articles(self, articles) -> int:
         """Save articles to DB. Returns count of newly inserted rows."""
@@ -101,6 +107,19 @@ class Database:
             """INSERT INTO dispatches (article_id, channel, sent_at, status)
                VALUES (?, ?, ?, ?)""",
             (article_id, channel, now, status),
+        )
+        self.conn.commit()
+
+    def get_uncrawled(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM articles WHERE is_relevant = 1 AND body IS NULL"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def save_body(self, article_id: int, body: str):
+        self.conn.execute(
+            "UPDATE articles SET body = ? WHERE id = ?",
+            (body, article_id),
         )
         self.conn.commit()
 

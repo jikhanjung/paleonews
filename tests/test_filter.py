@@ -29,8 +29,16 @@ def test_keyword_match_negative():
     assert not keyword_match("Quantum physics breakthrough", "New laser technology", keywords)
 
 
-def test_keyword_match_word_boundary():
+def test_keyword_match_prefix():
     keywords = ["fossil"]
     assert keyword_match("A fossil was found", "", keywords)
-    # "fossilized" should not match "fossil" with word boundary
-    assert not keyword_match("Fossilized remains", "", keywords)
+    # prefix matching: fossilized, fossils should match
+    assert keyword_match("Fossilized remains", "", keywords)
+    assert keyword_match("New fossils discovered", "", keywords)
+
+
+def test_keyword_match_no_partial_word():
+    keywords = ["extinct"]
+    assert keyword_match("Mass extinction event", "", keywords)
+    # "extinct" should not match inside unrelated words
+    assert not keyword_match("A distinctly new approach", "", keywords)

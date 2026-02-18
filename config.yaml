@@ -38,11 +38,34 @@ filter:
     - megafauna
     - stratigraphy
     - taphonomy
+    - archaeolog
+    - phylogenet
+    - morpholog
+    - biostratigraph
+    - paleoecolog
+  llm_filter:
+    enabled: true
+    model: "claude-haiku-4-5-20251001"
+
+crawler:
+  max_per_run: 20
 
 summarizer:
   model: "claude-sonnet-4-20250514"
   max_articles_per_run: 20
 
-telegram:
-  parse_mode: "HTML"
-  max_message_length: 4096
+channels:
+  telegram:
+    enabled: true
+    parse_mode: "HTML"
+    max_message_length: 4096
+  email:
+    enabled: false
+    smtp_host: "smtp.gmail.com"
+    smtp_port: 587
+    sender: ""
+    recipients: []
+  slack:
+    enabled: false
+  discord:
+    enabled: false
