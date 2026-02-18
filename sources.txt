@@ -1,0 +1,11 @@
+https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=science
+https://www.sciencedaily.com/rss/fossils_ruins.xml
+https://www.cambridge.org/core/rss/product/id/56B1B6F705BBEC4F8958383925A06535
+https://www.nature.com/nature.rss
+https://www.nature.com/subjects/palaeontology.rss
+https://phys.org/rss-feed/biology-news/paleontology/
+https://academic.oup.com/rss/site_5349/3215.xml
+https://onlinelibrary.wiley.com/feed/10960031/most-recent
+https://onlinelibrary.wiley.com/feed/14754983/most-recent
+https://onlinelibrary.wiley.com/feed/20562802/most-recent
+
