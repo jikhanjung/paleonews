@@ -8,6 +8,7 @@ dependencies = [
     "feedparser",
     "httpx",
     "anthropic",
+    "openai",
     "python-telegram-bot",
     "pyyaml",
     "python-dotenv",

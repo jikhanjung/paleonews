@@ -1,3 +1,6 @@
+llm:
+  provider: "anthropic"    # anthropic 또는 openai
+
 logging:
   level: "INFO"
   file: "logs/paleonews.log"

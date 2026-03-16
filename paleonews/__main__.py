@@ -8,9 +8,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from anthropic import Anthropic
-
 from .config import load_config
+from .llm import create_llm_client
 from .db import Database
 from .fetcher import fetch_all, load_sources
 from .crawler import crawl_articles
@@ -66,7 +65,7 @@ def cmd_fetch(db: Database, config: dict) -> tuple[int, int]:
 
 def cmd_filter(db: Database, config: dict) -> int:
     llm_enabled = config.get("filter", {}).get("llm_filter", {}).get("enabled", False)
-    client = Anthropic() if llm_enabled else None
+    client = create_llm_client(config) if llm_enabled else None
     relevant = filter_articles(db, config, llm_client=client)
     print(f"고생물학 관련: {relevant}건")
     return relevant
@@ -87,7 +86,7 @@ def cmd_summarize(db: Database, config: dict) -> int:
 
     model = config.get("summarizer", {}).get("model", "claude-sonnet-4-20250514")
     max_articles = config.get("summarizer", {}).get("max_articles_per_run", 20)
-    client = Anthropic()
+    client = create_llm_client(config)
 
     targets = unsummarized[:max_articles]
     for i, article in enumerate(targets, 1):

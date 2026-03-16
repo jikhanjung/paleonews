@@ -1,7 +1,7 @@
 import logging
 import re
 
-from anthropic import Anthropic
+from .llm import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ ARTICLE_PROMPT_WITH_BODY = """\
 
 
 def summarize_article(
-    client: Anthropic, article: dict, model: str
+    client: LLMClient, article: dict, model: str
 ) -> tuple[str, str]:
     """Summarize a single article. Returns (title_ko, summary_ko)."""
     body = article.get("body")
@@ -48,14 +48,7 @@ def summarize_article(
             source=article.get("source", ""),
         )
 
-    response = client.messages.create(
-        model=model,
-        max_tokens=512,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    text = response.content[0].text.strip()
+    text = client.chat(model, prompt, system=SYSTEM_PROMPT, max_tokens=512)
     return _parse_summary(text)
 
 

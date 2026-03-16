@@ -1,7 +1,7 @@
 import logging
 import re
 
-from anthropic import Anthropic
+from .llm import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -27,27 +27,22 @@ def keyword_match(title: str, summary: str, keywords: list[str]) -> bool:
     return any(re.search(rf"\b{re.escape(kw.lower())}", text) for kw in keywords)
 
 
-def llm_filter(client: Anthropic, article: dict, model: str) -> bool:
+def llm_filter(client: LLMClient, article: dict, model: str) -> bool:
     """Use LLM to judge paleontology relevance. Returns True if relevant."""
     prompt = LLM_FILTER_PROMPT.format(
         title=article.get("title", ""),
         summary=article.get("summary", ""),
     )
     try:
-        response = client.messages.create(
-            model=model,
-            max_tokens=8,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        answer = response.content[0].text.strip().lower()
-        return answer.startswith("yes")
+        answer = client.chat(model, prompt, max_tokens=8)
+        return answer.lower().startswith("yes")
     except Exception:
         logger.exception("LLM filter failed for article %s", article.get("id"))
         # On failure, keep the article (conservative approach)
         return True
 
 
-def filter_articles(db, config: dict, llm_client: Anthropic | None = None) -> int:
+def filter_articles(db, config: dict, llm_client: LLMClient | None = None) -> int:
     """Filter unfiltered articles and update DB. Returns count of relevant articles."""
     dedicated = config.get("dedicated_feeds", [])
     keywords = config.get("filter", {}).get("keywords", [])
