@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}PaleoNews - 설정{% endblock %}
+{% block content %}
+<h1 style="margin-bottom: 1.5rem;">설정</h1>
+
+<div class="card">
+    <h2>시스템 설정</h2>
+    <table>
+        <tr><th style="width:200px;">LLM 프로바이더</th><td>{{ config.llm.provider }}</td></tr>
+        <tr><th>필터 모델</th><td>{{ config.filter.llm_filter.model }}</td></tr>
+        <tr><th>요약 모델</th><td>{{ config.summarizer.model }}</td></tr>
+        <tr><th>챗봇 모델</th><td>{{ config.get("chat", {}).get("model", "claude-haiku-4-5-20251001") }}</td></tr>
+        <tr><th>DB 경로</th><td><code>{{ config.db_path }}</code></td></tr>
+        <tr><th>로그 레벨</th><td>{{ config.logging.level }}</td></tr>
+        <tr>
+            <th>채널</th>
+            <td>
+                {% for ch, cv in config.channels.items() %}
+                {% if cv.enabled %}
+                <span class="badge badge-green">{{ ch }}</span>
+                {% else %}
+                <span class="badge badge-gray">{{ ch }}</span>
+                {% endif %}
+                {% endfor %}
+            </td>
+        </tr>
+    </table>
+</div>
+
+<div class="card">
+    <h2>RSS 피드 소스 ({{ sources | length }}개)</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>URL</th>
+                <th style="width:80px;">작업</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for url in sources %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td style="word-break: break-all;"><code>{{ url }}</code></td>
+                <td>
+                    <form action="/settings/sources/remove" method="post" class="inline"
+                          onsubmit="return confirm('삭제하시겠습니까?')">
+                        <input type="hidden" name="url" value="{{ url }}">
+                        <button type="submit" class="btn btn-sm btn-danger">삭제</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <form action="/settings/sources/add" method="post" class="form-row">
+        <input type="text" name="url" placeholder="RSS 피드 URL" required style="flex: 1; min-width: 300px;">
+        <button type="submit" class="btn btn-primary">추가</button>
+    </form>
+</div>
+
+<div class="card">
+    <h2>필터 키워드 ({{ config.filter.keywords | length }}개)</h2>
+    <div style="display: flex; flex-wrap: wrap; gap: 0.4rem;">
+        {% for kw in config.filter.keywords %}
+        <span class="badge badge-blue">{{ kw }}</span>
+        {% endfor %}
+    </div>
+    <p class="text-muted mt-1">키워드 수정은 config.yaml 파일을 직접 편집하세요.</p>
+</div>
+{% endblock %}

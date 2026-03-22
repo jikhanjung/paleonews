@@ -13,6 +13,10 @@ dependencies = [
     "pyyaml",
     "python-dotenv",
     "readability-lxml",
+    "fastapi",
+    "uvicorn",
+    "jinja2",
+    "python-multipart",
 ]
 
 [project.scripts]

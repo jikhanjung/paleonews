@@ -63,6 +63,13 @@ class Database:
                 created_at   TEXT NOT NULL,
                 updated_at   TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS memories (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id    INTEGER NOT NULL REFERENCES users(id),
+                content    TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
         """)
         self.conn.commit()
         self._migrate()
@@ -163,7 +170,37 @@ class Database:
         return json.loads(row["keywords"])
 
     def remove_user(self, user_id: int):
+        self.conn.execute("DELETE FROM memories WHERE user_id = ?", (user_id,))
         self.conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        self.conn.commit()
+
+    # --- Memory methods ---
+
+    def save_memory(self, user_id: int, content: str) -> int:
+        """Save a memory for a user. Returns memory id."""
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = self.conn.execute(
+            "INSERT INTO memories (user_id, content, created_at) VALUES (?, ?, ?)",
+            (user_id, content, now),
+        )
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def get_memories(self, user_id: int) -> list[dict]:
+        """Get all memories for a user."""
+        rows = self.conn.execute(
+            "SELECT * FROM memories WHERE user_id = ? ORDER BY created_at",
+            (user_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_memory(self, memory_id: int):
+        self.conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+        self.conn.commit()
+
+    def clear_memories(self, user_id: int):
+        """Delete all memories for a user."""
+        self.conn.execute("DELETE FROM memories WHERE user_id = ?", (user_id,))
         self.conn.commit()
 
     # --- Article methods ---

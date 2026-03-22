@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}PaleoNews - 대시보드{% endblock %}
+{% block content %}
+<h1 style="margin-bottom: 1.5rem;">대시보드</h1>
+
+<div class="card">
+    <h2>통계</h2>
+    <div class="stat-grid">
+        <div class="stat-box">
+            <div class="number">{{ stats.total }}</div>
+            <div class="label">전체 기사</div>
+        </div>
+        <div class="stat-box">
+            <div class="number">{{ stats.relevant }}</div>
+            <div class="label">관련 기사</div>
+        </div>
+        <div class="stat-box">
+            <div class="number">{{ stats.summarized }}</div>
+            <div class="label">요약 완료</div>
+        </div>
+        <div class="stat-box">
+            <div class="number">{{ stats.sent }}</div>
+            <div class="label">전송 완료</div>
+        </div>
+        <div class="stat-box">
+            <div class="number">{{ active_users }}</div>
+            <div class="label">활성 사용자</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>최근 파이프라인 실행</h2>
+    {% if runs %}
+    <table>
+        <thead>
+            <tr>
+                <th>시각</th>
+                <th>상태</th>
+                <th>수집</th>
+                <th>신규</th>
+                <th>관련</th>
+                <th>크롤</th>
+                <th>요약</th>
+                <th>전송</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in runs %}
+            <tr>
+                <td>{{ r.started_at[:19] | replace("T", " ") }}</td>
+                <td>
+                    {% if r.status == "success" %}
+                    <span class="badge badge-green">성공</span>
+                    {% elif r.status == "error" %}
+                    <span class="badge badge-red">오류</span>
+                    {% else %}
+                    <span class="badge badge-gray">{{ r.status }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ r.fetched }}</td>
+                <td>{{ r.new_articles }}</td>
+                <td>{{ r.relevant }}</td>
+                <td>{{ r.crawled }}</td>
+                <td>{{ r.summarized }}</td>
+                <td>{{ r.sent }}</td>
+            </tr>
+            {% if r.errors %}
+            <tr>
+                <td colspan="8" style="color: #e74c3c; font-size: 0.85rem; padding-left: 2rem;">{{ r.errors }}</td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-muted">실행 기록이 없습니다.</p>
+    {% endif %}
+</div>
+{% endblock %}

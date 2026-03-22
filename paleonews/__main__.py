@@ -428,6 +428,11 @@ def main():
     # Telegram bot daemon
     subparsers.add_parser("bot", help="Run Telegram bot daemon")
 
+    # Web UI
+    web_parser = subparsers.add_parser("web", help="Run web admin UI")
+    web_parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
+    web_parser.add_argument("--port", type=int, default=8000, help="Bind port (default: 8000)")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -443,6 +448,11 @@ def main():
         if args.command == "bot":
             from .bot import run_bot
             run_bot(db, config)
+            return
+
+        if args.command == "web":
+            from .web import run_web
+            run_web(db, config, host=args.host, port=args.port)
             return
 
         commands = {

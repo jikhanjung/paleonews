@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}PaleoNews - 사용자{% endblock %}
+{% block content %}
+<h1 style="margin-bottom: 1.5rem;">사용자 관리</h1>
+
+<div class="card">
+    <h2>사용자 추가</h2>
+    <form action="/users/add" method="post" class="form-row">
+        <input type="text" name="chat_id" placeholder="Telegram Chat ID" required>
+        <input type="text" name="name" placeholder="이름 (선택)">
+        <label style="font-size: 0.9rem;">
+            <input type="checkbox" name="is_admin" value="true"> 관리자
+        </label>
+        <button type="submit" class="btn btn-primary">추가</button>
+    </form>
+</div>
+
+<div class="card">
+    <h2>사용자 목록 ({{ users | length }}명)</h2>
+    {% if users %}
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Chat ID</th>
+                <th>이름</th>
+                <th>상태</th>
+                <th>역할</th>
+                <th>키워드</th>
+                <th>기억</th>
+                <th>가입일</th>
+                <th>작업</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for u in users %}
+            <tr>
+                <td>{{ u.id }}</td>
+                <td><code>{{ u.chat_id }}</code></td>
+                <td>{{ u.display_name or u.username or "-" }}</td>
+                <td>
+                    {% if u.is_active %}
+                    <span class="badge badge-green">활성</span>
+                    {% else %}
+                    <span class="badge badge-red">비활성</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if u.is_admin %}
+                    <span class="badge badge-blue">관리자</span>
+                    {% else %}
+                    <span class="badge badge-gray">일반</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if u.keywords_list %}
+                    {{ u.keywords_list | join(", ") }}
+                    {% else %}
+                    <span class="text-muted">전체 수신</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if u.memories %}
+                    <span class="badge badge-blue">{{ u.memories | length }}건</span>
+                    {% else %}
+                    <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td class="text-muted">{{ u.created_at[:10] }}</td>
+                <td>
+                    <div class="actions">
+                        <form action="/users/{{ u.id }}/toggle" method="post" class="inline">
+                            <button type="submit" class="btn btn-sm btn-outline">
+                                {% if u.is_active %}비활성화{% else %}활성화{% endif %}
+                            </button>
+                        </form>
+                        <form action="/users/{{ u.id }}/admin" method="post" class="inline">
+                            <button type="submit" class="btn btn-sm btn-outline">
+                                {% if u.is_admin %}관리자 해제{% else %}관리자{% endif %}
+                            </button>
+                        </form>
+                        <form action="/users/{{ u.id }}/delete" method="post" class="inline"
+                              onsubmit="return confirm('정말 삭제하시겠습니까?')">
+                            <button type="submit" class="btn btn-sm btn-danger">삭제</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            <tr>
+                <td colspan="9" style="padding: 0.3rem 0.8rem; background: #fafafa;">
+                    <form action="/users/{{ u.id }}/keywords" method="post" class="form-row" style="margin: 0;">
+                        <span style="font-size: 0.85rem; color: #666;">키워드:</span>
+                        <input type="text" name="keywords"
+                               value="{% if u.keywords_list %}{{ u.keywords_list | join(' ') }}{% endif %}"
+                               placeholder="공백으로 구분 (* = 전체 수신)" style="flex: 1; min-width: 200px;">
+                        <button type="submit" class="btn btn-sm btn-primary">저장</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-muted">등록된 사용자가 없습니다.</p>
+    {% endif %}
+</div>
+{% endblock %}
