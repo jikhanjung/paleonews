@@ -1,42 +1,37 @@
 services:
-  # 파이프라인 cron (매일 08:00 KST 실행)
+  # 파이프라인 cron (기본: 매일 08:00 KST = 23:00 UTC)
   pipeline:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
-    command: ["run"]
+    image: honestjung/paleonews:latest
+    container_name: paleonews-pipeline
+    command: ["cron"]
     env_file: ../.env
+    environment:
+      - PIPELINE_CRON=${PIPELINE_CRON:-0 23 * * *}
     volumes:
-      - paleonews-data:/app/data
-      - paleonews-logs:/app/logs
-    restart: "no"
+      - /srv/paleonews/data:/app/data
+      - /srv/paleonews/logs:/app/logs
+    restart: unless-stopped
 
   # Telegram 봇 데몬 (상시 실행)
   bot:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+    image: honestjung/paleonews:latest
+    container_name: paleonews-bot
     command: ["bot"]
     env_file: ../.env
     volumes:
-      - paleonews-data:/app/data
-      - paleonews-logs:/app/logs
+      - /srv/paleonews/data:/app/data
+      - /srv/paleonews/logs:/app/logs
     restart: unless-stopped
 
   # 웹 관리 UI (상시 실행)
   web:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+    image: honestjung/paleonews:latest
+    container_name: paleonews-web
     command: ["web", "--host", "0.0.0.0", "--port", "8000"]
     env_file: ../.env
     ports:
       - "${WEB_PORT:-8000}:8000"
     volumes:
-      - paleonews-data:/app/data
-      - paleonews-logs:/app/logs
+      - /srv/paleonews/data:/app/data
+      - /srv/paleonews/logs:/app/logs
     restart: unless-stopped
-
-volumes:
-  paleonews-data:
-  paleonews-logs:

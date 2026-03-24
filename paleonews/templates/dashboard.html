@@ -1,7 +1,24 @@
 {% extends "base.html" %}
 {% block title %}PaleoNews - 대시보드{% endblock %}
 {% block content %}
-<h1 style="margin-bottom: 1.5rem;">대시보드</h1>
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+    <h1>대시보드</h1>
+    <div style="display:flex; gap:0.5rem; align-items:center;">
+        {% if pipeline_status.running %}
+        <span class="badge badge-blue" id="pipeline-badge">실행 중...</span>
+        {% elif pipeline_status.last_result == "success" %}
+        <span class="badge badge-green" id="pipeline-badge">완료</span>
+        {% elif pipeline_status.last_result and pipeline_status.last_result.startswith("error") %}
+        <span class="badge badge-red" id="pipeline-badge">오류</span>
+        {% endif %}
+        <form action="/pipeline/run" method="post" class="inline" id="pipeline-form">
+            <button type="submit" class="btn btn-primary" id="pipeline-btn"
+                    {% if pipeline_status.running %}disabled{% endif %}>
+                {% if pipeline_status.running %}파이프라인 실행 중...{% else %}파이프라인 실행{% endif %}
+            </button>
+        </form>
+    </div>
+</div>
 
 <div class="card">
     <h2>통계</h2>
@@ -77,4 +94,60 @@
     <p class="text-muted">실행 기록이 없습니다.</p>
     {% endif %}
 </div>
+
+<div class="card">
+    <h2>출처별 통계</h2>
+    {% if source_stats %}
+    <table>
+        <thead>
+            <tr>
+                <th>출처</th>
+                <th style="width:80px; text-align:right;">전체</th>
+                <th style="width:80px; text-align:right;">관련</th>
+                <th style="width:80px; text-align:right;">요약</th>
+                <th style="width:100px;">비율</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in source_stats %}
+            <tr>
+                <td style="font-size:0.9rem;">{{ s.source or "Unknown" }}</td>
+                <td style="text-align:right;">{{ s.total }}</td>
+                <td style="text-align:right;">{{ s.relevant }}</td>
+                <td style="text-align:right;">{{ s.summarized }}</td>
+                <td>
+                    {% if s.total > 0 %}
+                    <div style="background:#eee; border-radius:4px; height:8px; width:100%;">
+                        <div style="background:#3498db; border-radius:4px; height:8px; width:{{ (s.relevant / s.total * 100) | int }}%;"></div>
+                    </div>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-muted">출처별 통계가 없습니다.</p>
+    {% endif %}
+</div>
+
+<!-- Auto-refresh when pipeline is running -->
+{% if pipeline_status.running %}
+<script>
+(function poll() {
+    setTimeout(function() {
+        fetch("/pipeline/status")
+            .then(r => r.json())
+            .then(data => {
+                if (!data.running) {
+                    location.reload();
+                } else {
+                    poll();
+                }
+            })
+            .catch(() => poll());
+    }, 3000);
+})();
+</script>
+{% endif %}
 {% endblock %}

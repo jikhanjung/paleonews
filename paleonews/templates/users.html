@@ -8,6 +8,7 @@
     <form action="/users/add" method="post" class="form-row">
         <input type="text" name="chat_id" placeholder="Telegram Chat ID" required>
         <input type="text" name="name" placeholder="이름 (선택)">
+        <input type="text" name="email" placeholder="이메일 (선택)">
         <label style="font-size: 0.9rem;">
             <input type="checkbox" name="is_admin" value="true"> 관리자
         </label>
@@ -24,6 +25,7 @@
                 <th>ID</th>
                 <th>Chat ID</th>
                 <th>이름</th>
+                <th>이메일</th>
                 <th>상태</th>
                 <th>역할</th>
                 <th>키워드</th>
@@ -38,6 +40,13 @@
                 <td>{{ u.id }}</td>
                 <td><code>{{ u.chat_id }}</code></td>
                 <td>{{ u.display_name or u.username or "-" }}</td>
+                <td>
+                    {% if u.email %}
+                    <span style="font-size:0.85rem;">{{ u.email }}</span>
+                    {% else %}
+                    <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
                 <td>
                     {% if u.is_active %}
                     <span class="badge badge-green">활성</span>
@@ -87,14 +96,23 @@
                 </td>
             </tr>
             <tr>
-                <td colspan="9" style="padding: 0.3rem 0.8rem; background: #fafafa;">
-                    <form action="/users/{{ u.id }}/keywords" method="post" class="form-row" style="margin: 0;">
-                        <span style="font-size: 0.85rem; color: #666;">키워드:</span>
-                        <input type="text" name="keywords"
-                               value="{% if u.keywords_list %}{{ u.keywords_list | join(' ') }}{% endif %}"
-                               placeholder="공백으로 구분 (* = 전체 수신)" style="flex: 1; min-width: 200px;">
-                        <button type="submit" class="btn btn-sm btn-primary">저장</button>
-                    </form>
+                <td colspan="10" style="padding: 0.3rem 0.8rem; background: #fafafa;">
+                    <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+                        <form action="/users/{{ u.id }}/keywords" method="post" class="form-row" style="margin:0; flex:1; min-width:250px;">
+                            <span style="font-size: 0.85rem; color: #666;">키워드:</span>
+                            <input type="text" name="keywords"
+                                   value="{% if u.keywords_list %}{{ u.keywords_list | join(' ') }}{% endif %}"
+                                   placeholder="공백으로 구분 (* = 전체 수신)" style="flex: 1; min-width: 150px;">
+                            <button type="submit" class="btn btn-sm btn-primary">저장</button>
+                        </form>
+                        <form action="/users/{{ u.id }}/email" method="post" class="form-row" style="margin:0; flex:1; min-width:250px;">
+                            <span style="font-size: 0.85rem; color: #666;">이메일:</span>
+                            <input type="email" name="email"
+                                   value="{{ u.email or '' }}"
+                                   placeholder="user@example.com" style="flex: 1; min-width: 150px;">
+                            <button type="submit" class="btn btn-sm btn-primary">저장</button>
+                        </form>
+                    </div>
                 </td>
             </tr>
             {% endfor %}

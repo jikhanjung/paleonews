@@ -3,10 +3,12 @@
 import json
 import logging
 import os
+import threading
+from datetime import date
 from pathlib import Path
 
-from fastapi import FastAPI, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Request, Form, Query
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from .config import load_config
@@ -19,6 +21,9 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 _db: Database | None = None
 _config: dict | None = None
+
+# Pipeline execution state
+_pipeline_status = {"running": False, "last_result": None}
 
 
 def get_db() -> Database:
@@ -45,13 +50,77 @@ async def dashboard(request: Request):
     stats = db.get_stats()
     users = db.get_all_users()
     runs = db.get_recent_runs(5)
+    source_stats = db.get_source_stats()
     active_users = sum(1 for u in users if u["is_active"])
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "dashboard.html", {
         "stats": stats,
         "users": users,
         "runs": runs,
         "active_users": active_users,
+        "source_stats": source_stats,
+        "pipeline_status": _pipeline_status,
+    })
+
+
+# --- Pipeline execution ---
+
+@app.post("/pipeline/run")
+async def pipeline_run():
+    """Trigger pipeline execution in background thread."""
+    if _pipeline_status["running"]:
+        return JSONResponse({"status": "already_running"}, status_code=409)
+
+    _pipeline_status["running"] = True
+    _pipeline_status["last_result"] = None
+
+    def run():
+        try:
+            from .__main__ import _run_pipeline
+            config = get_config()
+            db = Database(config.get("db_path", "paleonews.db"))
+            db.init_tables()
+            try:
+                _run_pipeline(db, config)
+                _pipeline_status["last_result"] = "success"
+            finally:
+                db.close()
+        except Exception as e:
+            logger.exception("Pipeline execution failed")
+            _pipeline_status["last_result"] = f"error: {e}"
+        finally:
+            _pipeline_status["running"] = False
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return RedirectResponse("/", status_code=303)
+
+
+@app.get("/pipeline/status")
+async def pipeline_status():
+    return JSONResponse(_pipeline_status)
+
+
+# --- Articles ---
+
+@app.get("/articles", response_class=HTMLResponse)
+async def articles_list(
+    request: Request,
+    q: str = Query("", description="Search query"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(30, ge=10, le=100),
+    status: str = Query("all", description="Filter: all, relevant, summarized, sent"),
+):
+    db = get_db()
+    articles, total = db.search_articles(q, status=status, page=page, per_page=per_page)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    return templates.TemplateResponse(request, "articles.html", {
+        "articles": articles,
+        "q": q,
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "total_pages": total_pages,
+        "status_filter": status,
     })
 
 
@@ -67,18 +136,23 @@ async def users_list(request: Request):
         else:
             u["keywords_list"] = None
         u["memories"] = db.get_memories(u["id"])
-    return templates.TemplateResponse("users.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "users.html", {
         "users": users,
     })
 
 
 @app.post("/users/add")
-async def users_add(chat_id: str = Form(...), name: str = Form(""), is_admin: bool = Form(False)):
+async def users_add(
+    chat_id: str = Form(...),
+    name: str = Form(""),
+    email: str = Form(""),
+    is_admin: bool = Form(False),
+):
     db = get_db()
     existing = db.get_user_by_chat_id(chat_id)
     if not existing:
-        db.add_user(chat_id, username=name or None, is_admin=is_admin)
+        db.add_user(chat_id, username=name or None, is_admin=is_admin,
+                     email=email or None)
     return RedirectResponse("/users", status_code=303)
 
 
@@ -100,6 +174,13 @@ async def users_keywords(user_id: int, keywords: str = Form("")):
     else:
         kw_list = [k.strip() for k in kw.split() if k.strip()]
         db.update_user_keywords(user_id, kw_list)
+    return RedirectResponse("/users", status_code=303)
+
+
+@app.post("/users/{user_id}/email")
+async def users_email(user_id: int, email: str = Form("")):
+    db = get_db()
+    db.update_user_email(user_id, email.strip() or None)
     return RedirectResponse("/users", status_code=303)
 
 
@@ -134,8 +215,7 @@ async def settings_page(request: Request):
     if path.exists():
         sources = [line.strip() for line in path.read_text().splitlines()
                    if line.strip() and not line.startswith("#")]
-    return templates.TemplateResponse("settings.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "settings.html", {
         "config": config,
         "sources": sources,
     })

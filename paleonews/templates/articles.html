@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}PaleoNews - 기사{% endblock %}
+{% block content %}
+<h1 style="margin-bottom: 1.5rem;">기사 목록</h1>
+
+<div class="card">
+    <h2>검색 및 필터</h2>
+    <form action="/articles" method="get" class="form-row">
+        <input type="text" name="q" value="{{ q }}" placeholder="제목, 한국어 제목, 출처 검색..." style="flex: 1; min-width: 200px;">
+        <select name="status" style="padding: 0.4rem 0.6rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.9rem;">
+            <option value="all" {% if status_filter == "all" %}selected{% endif %}>전체</option>
+            <option value="relevant" {% if status_filter == "relevant" %}selected{% endif %}>관련 기사</option>
+            <option value="summarized" {% if status_filter == "summarized" %}selected{% endif %}>요약 완료</option>
+            <option value="sent" {% if status_filter == "sent" %}selected{% endif %}>전송 완료</option>
+        </select>
+        <button type="submit" class="btn btn-primary">검색</button>
+        {% if q or status_filter != "all" %}
+        <a href="/articles" class="btn btn-outline">초기화</a>
+        {% endif %}
+    </form>
+    <p class="text-muted mt-1">총 {{ total }}건{% if q %} (검색: "{{ q }}"){% endif %}</p>
+</div>
+
+<div class="card">
+    <h2>기사 ({{ total }}건)</h2>
+    {% if articles %}
+    <table>
+        <thead>
+            <tr>
+                <th style="width:40px;">ID</th>
+                <th>제목</th>
+                <th style="width:120px;">출처</th>
+                <th style="width:90px;">날짜</th>
+                <th style="width:160px;">상태</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for a in articles %}
+            <tr>
+                <td class="text-muted">{{ a.id }}</td>
+                <td>
+                    {% if a.title_ko %}
+                    <div style="font-weight:500;">{{ a.title_ko }}</div>
+                    <div class="text-muted" style="font-size:0.8rem;">{{ a.title[:80] }}{% if a.title|length > 80 %}...{% endif %}</div>
+                    {% else %}
+                    <div>{{ a.title[:100] }}{% if a.title|length > 100 %}...{% endif %}</div>
+                    {% endif %}
+                    <a href="{{ a.url }}" target="_blank" class="text-muted" style="font-size:0.75rem; text-decoration:none;">
+                        {{ a.url[:60] }}{% if a.url|length > 60 %}...{% endif %}
+                    </a>
+                </td>
+                <td class="text-muted" style="font-size:0.85rem;">{{ a.source or "-" }}</td>
+                <td class="text-muted" style="font-size:0.85rem;">
+                    {% if a.published %}{{ a.published[:10] }}{% else %}{{ a.fetched_at[:10] }}{% endif %}
+                </td>
+                <td>
+                    {% if a.is_relevant == 1 %}
+                    <span class="badge badge-green">관련</span>
+                    {% elif a.is_relevant == 0 %}
+                    <span class="badge badge-gray">비관련</span>
+                    {% else %}
+                    <span class="badge badge-gray">미분류</span>
+                    {% endif %}
+
+                    {% if a.summary_ko %}
+                    <span class="badge badge-blue">요약</span>
+                    {% endif %}
+
+                    {% if a.is_sent %}
+                    <span class="badge badge-green">전송</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% if a.summary_ko %}
+            <tr>
+                <td></td>
+                <td colspan="4" style="padding:0.3rem 0.8rem 0.8rem; background:#fafafa; font-size:0.85rem; color:#555; line-height:1.5;">
+                    {{ a.summary_ko }}
+                </td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Pagination -->
+    {% if total_pages > 1 %}
+    <div style="display:flex; justify-content:center; align-items:center; gap:0.5rem; margin-top:1.5rem;">
+        {% if page > 1 %}
+        <a href="/articles?q={{ q }}&status={{ status_filter }}&page={{ page - 1 }}&per_page={{ per_page }}" class="btn btn-sm btn-outline">&laquo; 이전</a>
+        {% endif %}
+
+        {% for p in range(1, total_pages + 1) %}
+            {% if p == page %}
+            <span class="btn btn-sm btn-primary">{{ p }}</span>
+            {% elif p <= 3 or p >= total_pages - 2 or (p >= page - 2 and p <= page + 2) %}
+            <a href="/articles?q={{ q }}&status={{ status_filter }}&page={{ p }}&per_page={{ per_page }}" class="btn btn-sm btn-outline">{{ p }}</a>
+            {% elif p == 4 or p == total_pages - 3 %}
+            <span class="text-muted">...</span>
+            {% endif %}
+        {% endfor %}
+
+        {% if page < total_pages %}
+        <a href="/articles?q={{ q }}&status={{ status_filter }}&page={{ page + 1 }}&per_page={{ per_page }}" class="btn btn-sm btn-outline">다음 &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <p class="text-muted">기사가 없습니다.</p>
+    {% endif %}
+</div>
+{% endblock %}

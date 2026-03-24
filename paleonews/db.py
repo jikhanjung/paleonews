@@ -57,6 +57,7 @@ class Database:
                 chat_id      TEXT UNIQUE NOT NULL,
                 username     TEXT,
                 display_name TEXT,
+                email        TEXT,
                 is_active    BOOLEAN NOT NULL DEFAULT 1,
                 is_admin     BOOLEAN NOT NULL DEFAULT 0,
                 keywords     TEXT,
@@ -88,6 +89,12 @@ class Database:
             self.conn.execute("ALTER TABLE dispatches ADD COLUMN user_id INTEGER REFERENCES users(id)")
             self.conn.commit()
 
+        # Migrate: add email column to users if missing
+        user_cols = [row[1] for row in self.conn.execute("PRAGMA table_info(users)")]
+        if "email" not in user_cols:
+            self.conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
+            self.conn.commit()
+
     def seed_admin(self, chat_id: str, username: str | None = None):
         """Seed admin user from TELEGRAM_CHAT_ID. Backfills existing telegram dispatches."""
         existing = self.get_user_by_chat_id(chat_id)
@@ -117,16 +124,32 @@ class Database:
     # --- User CRUD ---
 
     def add_user(self, chat_id: str, username: str | None = None,
-                 display_name: str | None = None, is_admin: bool = False) -> int:
+                 display_name: str | None = None, is_admin: bool = False,
+                 email: str | None = None) -> int:
         """Add a new user. Returns user id."""
         now = datetime.now(timezone.utc).isoformat()
         cursor = self.conn.execute(
-            """INSERT INTO users (chat_id, username, display_name, is_active, is_admin, keywords, created_at, updated_at)
-               VALUES (?, ?, ?, 1, ?, NULL, ?, ?)""",
-            (chat_id, username, display_name or username, is_admin, now, now),
+            """INSERT INTO users (chat_id, username, display_name, email, is_active, is_admin, keywords, created_at, updated_at)
+               VALUES (?, ?, ?, ?, 1, ?, NULL, ?, ?)""",
+            (chat_id, username, display_name or username, email, is_admin, now, now),
         )
         self.conn.commit()
         return cursor.lastrowid
+
+    def update_user_email(self, user_id: int, email: str | None):
+        now = datetime.now(timezone.utc).isoformat()
+        self.conn.execute(
+            "UPDATE users SET email = ?, updated_at = ? WHERE id = ?",
+            (email, now, user_id),
+        )
+        self.conn.commit()
+
+    def get_email_users(self) -> list[dict]:
+        """Get active users with email addresses."""
+        rows = self.conn.execute(
+            "SELECT * FROM users WHERE is_active = 1 AND email IS NOT NULL AND email != ''"
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def get_user_by_chat_id(self, chat_id: str) -> dict | None:
         row = self.conn.execute("SELECT * FROM users WHERE chat_id = ?", (chat_id,)).fetchone()
@@ -366,6 +389,44 @@ class Database:
             "summarized": summarized,
             "sent": sent,
         }
+
+    def search_articles(self, query: str = "", status: str = "all",
+                        page: int = 1, per_page: int = 30) -> tuple[list[dict], int]:
+        """Search articles with pagination. Returns (articles, total_count)."""
+        conditions = []
+        params: list = []
+
+        if query:
+            conditions.append("(a.title LIKE ? OR a.title_ko LIKE ? OR a.source LIKE ?)")
+            q = f"%{query}%"
+            params.extend([q, q, q])
+
+        if status == "relevant":
+            conditions.append("a.is_relevant = 1")
+        elif status == "summarized":
+            conditions.append("a.summary_ko IS NOT NULL")
+        elif status == "sent":
+            conditions.append(
+                "a.id IN (SELECT article_id FROM dispatches WHERE status = 'success')"
+            )
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        count = self.conn.execute(
+            f"SELECT COUNT(*) FROM articles a {where}", params,
+        ).fetchone()[0]
+
+        offset = (page - 1) * per_page
+        rows = self.conn.execute(
+            f"""SELECT a.*,
+                       EXISTS(SELECT 1 FROM dispatches d WHERE d.article_id = a.id AND d.status = 'success') as is_sent
+                FROM articles a {where}
+                ORDER BY a.id DESC
+                LIMIT ? OFFSET ?""",
+            params + [per_page, offset],
+        ).fetchall()
+
+        return [dict(r) for r in rows], count
 
     def close(self):
         self.conn.close()

@@ -156,27 +156,60 @@ def cmd_send(db: Database, config: dict):
                 print(f"Telegram [{chat_id}] 전송 {'완료' if success else '실패'}: {len(filtered)}건")
                 sent_any = True
 
-    # Email
+    # Email — per-user dispatch
     email_config = channels_config.get("email", {})
     if email_config.get("enabled", False):
         password = os.environ.get("EMAIL_PASSWORD", "")
         sender = email_config.get("sender", "")
-        recipients = email_config.get("recipients", [])
-        if sender and password and recipients:
-            unsent = db.get_unsent("email")
-            if unsent:
-                briefing = generate_briefing(unsent, date.today().isoformat())
-                dispatcher = EmailDispatcher(
-                    email_config.get("smtp_host", "smtp.gmail.com"),
-                    email_config.get("smtp_port", 587),
-                    sender, password, recipients,
-                )
-                success = asyncio.run(dispatcher.send_briefing(briefing))
+        smtp_host = email_config.get("smtp_host", "smtp.gmail.com")
+        smtp_port = email_config.get("smtp_port", 587)
+
+        if sender and password:
+            # Per-user email dispatch
+            email_users = db.get_email_users()
+
+            # Also include static recipients from config (backwards compatible)
+            static_recipients = email_config.get("recipients", [])
+
+            for user in email_users:
+                user_id = user["id"]
+                user_email = user["email"]
+
+                unsent = db.get_unsent_for_user("email", user_id)
+                if not unsent:
+                    continue
+
+                user_keywords = db.get_user_keywords(user_id)
+                filtered = filter_articles_for_user(unsent, user_keywords)
+
+                if not filtered:
+                    for a in unsent:
+                        db.record_dispatch(a["id"], "email", "filtered", user_id=user_id)
+                    continue
+
+                dispatcher = EmailDispatcher(smtp_host, smtp_port, sender, password, [user_email])
+                success = asyncio.run(dispatcher.send_articles(filtered, date.today().isoformat()))
                 status = "success" if success else "failed"
+                for a in filtered:
+                    db.record_dispatch(a["id"], "email", status, user_id=user_id)
+                filtered_ids = {a["id"] for a in filtered}
                 for a in unsent:
-                    db.record_dispatch(a["id"], "email", status)
-                print(f"Email 전송 {'완료' if success else '실패'}: {len(unsent)}건")
+                    if a["id"] not in filtered_ids:
+                        db.record_dispatch(a["id"], "email", "filtered", user_id=user_id)
+                print(f"Email [{user_email}] 전송 {'완료' if success else '실패'}: {len(filtered)}건")
                 sent_any = True
+
+            # Static recipients (no user_id, legacy mode)
+            if static_recipients:
+                unsent = db.get_unsent("email")
+                if unsent:
+                    dispatcher = EmailDispatcher(smtp_host, smtp_port, sender, password, static_recipients)
+                    success = asyncio.run(dispatcher.send_articles(unsent, date.today().isoformat()))
+                    status = "success" if success else "failed"
+                    for a in unsent:
+                        db.record_dispatch(a["id"], "email", status)
+                    print(f"Email {static_recipients} 전송 {'완료' if success else '실패'}: {len(unsent)}건")
+                    sent_any = True
 
     # Slack
     slack_config = channels_config.get("slack", {})
@@ -227,13 +260,14 @@ def cmd_users(db: Database, args):
         for u in users:
             status = "활성" if u["is_active"] else "비활성"
             admin = " [관리자]" if u["is_admin"] else ""
+            email_str = f" email={u['email']}" if u.get("email") else ""
             kw = u["keywords"]
             if kw:
                 kw_list = json.loads(kw)
                 kw_str = f" 키워드: {', '.join(kw_list)}"
             else:
                 kw_str = " 키워드: 전체 수신"
-            print(f"  {u['id']}. chat_id={u['chat_id']} ({status}{admin}){kw_str}")
+            print(f"  {u['id']}. chat_id={u['chat_id']}{email_str} ({status}{admin}){kw_str}")
 
     elif sub == "add":
         chat_id = args.chat_id
@@ -242,9 +276,10 @@ def cmd_users(db: Database, args):
             print(f"이미 등록된 사용자입니다: chat_id={chat_id}")
             return
         name = getattr(args, "name", None)
+        email = getattr(args, "email", None)
         is_admin = getattr(args, "admin", False)
-        user_id = db.add_user(chat_id, username=name, is_admin=is_admin)
-        print(f"사용자 추가: id={user_id}, chat_id={chat_id}")
+        user_id = db.add_user(chat_id, username=name, is_admin=is_admin, email=email)
+        print(f"사용자 추가: id={user_id}, chat_id={chat_id}" + (f", email={email}" if email else ""))
 
     elif sub == "remove":
         chat_id = args.chat_id
@@ -275,6 +310,23 @@ def cmd_users(db: Database, args):
         else:
             db.update_user_keywords(user["id"], kw_input)
             print(f"chat_id={chat_id}: 키워드 설정 → {', '.join(kw_input)}")
+
+    elif sub == "email":
+        chat_id = args.chat_id
+        user = db.get_user_by_chat_id(chat_id)
+        if not user:
+            print(f"사용자를 찾을 수 없습니다: chat_id={chat_id}")
+            return
+        email_addr = getattr(args, "email_addr", None)
+        if email_addr is None:
+            current = user.get("email") or "없음"
+            print(f"chat_id={chat_id}: email={current}")
+        elif email_addr.lower() == "none":
+            db.update_user_email(user["id"], None)
+            print(f"chat_id={chat_id}: 이메일 삭제")
+        else:
+            db.update_user_email(user["id"], email_addr)
+            print(f"chat_id={chat_id}: email={email_addr}")
 
     elif sub == "activate":
         chat_id = args.chat_id
@@ -414,12 +466,16 @@ def main():
     user_add = users_sub.add_parser("add", help="Add a user")
     user_add.add_argument("chat_id", help="Telegram chat ID")
     user_add.add_argument("--name", help="Username / display name")
+    user_add.add_argument("--email", help="Email address for email dispatch")
     user_add.add_argument("--admin", action="store_true", help="Set as admin")
     user_remove = users_sub.add_parser("remove", help="Remove a user")
     user_remove.add_argument("chat_id", help="Telegram chat ID")
     user_kw = users_sub.add_parser("keywords", help="Set user keywords (use * for all)")
     user_kw.add_argument("chat_id", help="Telegram chat ID")
     user_kw.add_argument("keywords_list", nargs="*", help="Keywords (omit to show, * for all)")
+    user_email = users_sub.add_parser("email", help="Set user email address")
+    user_email.add_argument("chat_id", help="Telegram chat ID")
+    user_email.add_argument("email_addr", nargs="?", help="Email address (omit to show, 'none' to clear)")
     user_activate = users_sub.add_parser("activate", help="Activate a user")
     user_activate.add_argument("chat_id", help="Telegram chat ID")
     user_deactivate = users_sub.add_parser("deactivate", help="Deactivate a user")
