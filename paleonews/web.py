@@ -271,41 +271,34 @@ async def users_toggle_admin(user_id: int):
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
     config = get_config()
-    sources_file = config.get("sources_file", "sources.txt")
-    sources = []
-    path = Path(sources_file)
-    if path.exists():
-        sources = [line.strip() for line in path.read_text().splitlines()
-                   if line.strip() and not line.startswith("#")]
+    feeds = get_db().get_all_feeds()
     return templates.TemplateResponse(request, "settings.html", {
         "config": config,
-        "sources": sources,
+        "feeds": feeds,
     })
 
 
 @app.post("/settings/sources/add")
 async def sources_add(url: str = Form(...)):
-    config = get_config()
-    path = Path(config.get("sources_file", "sources.txt"))
-    existing = []
-    if path.exists():
-        existing = [line.strip() for line in path.read_text().splitlines()
-                    if line.strip() and not line.startswith("#")]
+    import sqlite3
     url = url.strip()
-    if url and url not in existing:
-        with open(path, "a") as f:
-            f.write(f"{url}\n")
+    if url:
+        try:
+            get_db().add_feed(url)
+        except sqlite3.IntegrityError:
+            pass
     return RedirectResponse("/settings", status_code=303)
 
 
 @app.post("/settings/sources/remove")
-async def sources_remove(url: str = Form(...)):
-    config = get_config()
-    path = Path(config.get("sources_file", "sources.txt"))
-    if path.exists():
-        lines = path.read_text().splitlines()
-        new_lines = [line for line in lines if line.strip() != url.strip()]
-        path.write_text("\n".join(new_lines) + "\n")
+async def sources_remove(feed_id: int = Form(...)):
+    get_db().remove_feed(feed_id)
+    return RedirectResponse("/settings", status_code=303)
+
+
+@app.post("/settings/sources/toggle")
+async def sources_toggle(feed_id: int = Form(...), is_active: int = Form(...)):
+    get_db().set_feed_active(feed_id, bool(is_active))
     return RedirectResponse("/settings", status_code=303)
 
 

@@ -11,7 +11,7 @@ from pathlib import Path
 from .config import load_config
 from .llm import create_llm_client
 from .db import Database
-from .fetcher import fetch_all, load_sources
+from .fetcher import fetch_all
 from .crawler import crawl_articles
 from .filter import filter_articles, filter_articles_for_user
 from .summarizer import generate_briefing, summarize_article
@@ -56,7 +56,7 @@ def setup_logging(config: dict):
 
 
 def cmd_fetch(db: Database, config: dict) -> tuple[int, int]:
-    sources = load_sources(config["sources_file"])
+    sources = [f["url"] for f in db.get_active_feeds()]
     articles = fetch_all(sources)
     new_count = db.save_articles(articles)
     print(f"수집: {len(articles)}건, 신규: {new_count}건")
@@ -346,46 +346,47 @@ def cmd_users(db: Database, args):
         print(f"사용자 비활성화: id={args.user_id}")
 
 
-def cmd_sources(config: dict, args):
-    sources_file = config["sources_file"]
-    path = Path(sources_file)
+def cmd_sources(db: Database, args):
+    import sqlite3 as _sqlite3
 
     if args.sources_command == "list" or args.sources_command is None:
-        if not path.exists():
-            print(f"{sources_file}이 없습니다.")
-            return
-        sources = [line.strip() for line in path.read_text().strip().splitlines()
-                   if line.strip() and not line.startswith("#")]
-        print(f"피드 소스 ({len(sources)}개):")
-        for i, url in enumerate(sources, 1):
-            print(f"  {i}. {url}")
+        feeds = db.get_all_feeds()
+        active = sum(1 for f in feeds if f["is_active"])
+        print(f"피드 소스 ({len(feeds)}개, 활성 {active}개):")
+        for f in feeds:
+            mark = " " if f["is_active"] else "x"
+            print(f"  [{mark}] {f['id']}. {f['url']}")
 
     elif args.sources_command == "add":
         url = args.url.strip()
-        # Check for duplicates
-        existing = []
-        if path.exists():
-            existing = [line.strip() for line in path.read_text().strip().splitlines()
-                       if line.strip() and not line.startswith("#")]
-        if url in existing:
+        try:
+            feed_id = db.add_feed(url)
+            print(f"소스 추가: id={feed_id} {url}")
+        except _sqlite3.IntegrityError:
             print(f"이미 등록된 소스입니다: {url}")
-            return
-        with open(path, "a") as f:
-            f.write(f"\n{url}\n")
-        print(f"소스 추가: {url}")
 
     elif args.sources_command == "remove":
-        url = args.url.strip()
-        if not path.exists():
-            print(f"{sources_file}이 없습니다.")
+        target = args.url.strip()
+        feed = db.get_feed_by_url(target)
+        if not feed and target.isdigit():
+            feed = next((f for f in db.get_all_feeds() if f["id"] == int(target)), None)
+        if not feed:
+            print(f"해당 소스를 찾을 수 없습니다: {target}")
             return
-        lines = path.read_text().splitlines()
-        new_lines = [line for line in lines if line.strip() != url]
-        if len(new_lines) == len(lines):
-            print(f"해당 소스를 찾을 수 없습니다: {url}")
+        db.remove_feed(feed["id"])
+        print(f"소스 삭제: id={feed['id']} {feed['url']}")
+
+    elif args.sources_command in ("activate", "deactivate"):
+        target = args.url.strip()
+        feed = db.get_feed_by_url(target)
+        if not feed and target.isdigit():
+            feed = next((f for f in db.get_all_feeds() if f["id"] == int(target)), None)
+        if not feed:
+            print(f"해당 소스를 찾을 수 없습니다: {target}")
             return
-        path.write_text("\n".join(new_lines) + "\n")
-        print(f"소스 삭제: {url}")
+        active = args.sources_command == "activate"
+        db.set_feed_active(feed["id"], active)
+        print(f"소스 {'활성화' if active else '비활성화'}: id={feed['id']} {feed['url']}")
 
 
 def cmd_status(db: Database, verbose: bool = False):
@@ -456,7 +457,11 @@ def main():
     add_parser = sources_sub.add_parser("add", help="Add a feed source")
     add_parser.add_argument("url", help="RSS feed URL to add")
     remove_parser = sources_sub.add_parser("remove", help="Remove a feed source")
-    remove_parser.add_argument("url", help="RSS feed URL to remove")
+    remove_parser.add_argument("url", help="RSS feed URL or id to remove")
+    activate_parser = sources_sub.add_parser("activate", help="Activate a feed source")
+    activate_parser.add_argument("url", help="RSS feed URL or id")
+    deactivate_parser = sources_sub.add_parser("deactivate", help="Deactivate a feed source")
+    deactivate_parser.add_argument("url", help="RSS feed URL or id")
 
     # User management
     users_parser = subparsers.add_parser("users", help="Manage subscribers")
@@ -499,6 +504,13 @@ def main():
     db = Database(config.get("db_path", "paleonews.db"))
     db.init_tables()
 
+    # One-time migration: import sources.txt into feeds table on first run
+    sources_file = config.get("sources_file")
+    if sources_file:
+        imported = db.migrate_feeds_from_file(sources_file)
+        if imported:
+            logger.info("Imported %d feeds from %s into DB", imported, sources_file)
+
     try:
         if args.command == "bot":
             from .bot import run_bot
@@ -517,7 +529,7 @@ def main():
             "summarize": lambda: cmd_summarize(db, config),
             "send": lambda: cmd_send(db, config),
             "status": lambda: cmd_status(db, verbose=getattr(args, "verbose", False)),
-            "sources": lambda: cmd_sources(config, args),
+            "sources": lambda: cmd_sources(db, args),
             "users": lambda: cmd_users(db, args),
             "run": lambda: _run_pipeline(db, config),
         }

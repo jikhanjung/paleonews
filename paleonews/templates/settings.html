@@ -28,24 +28,38 @@
 </div>
 
 <div class="card">
-    <h2>RSS 피드 소스 ({{ sources | length }}개)</h2>
+    {% set active_count = feeds | selectattr("is_active") | list | length %}
+    <h2>RSS 피드 소스 ({{ feeds | length }}개, 활성 {{ active_count }}개)</h2>
     <table>
         <thead>
             <tr>
-                <th>#</th>
+                <th style="width:50px;">ID</th>
                 <th>URL</th>
-                <th style="width:80px;">작업</th>
+                <th style="width:70px;">상태</th>
+                <th style="width:160px;">작업</th>
             </tr>
         </thead>
         <tbody>
-            {% for url in sources %}
+            {% for feed in feeds %}
             <tr>
-                <td>{{ loop.index }}</td>
-                <td style="word-break: break-all;"><code>{{ url }}</code></td>
+                <td>{{ feed.id }}</td>
+                <td style="word-break: break-all;"><code>{{ feed.url }}</code></td>
                 <td>
+                    {% if feed.is_active %}
+                    <span class="badge badge-green">활성</span>
+                    {% else %}
+                    <span class="badge badge-gray">비활성</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <form action="/settings/sources/toggle" method="post" class="inline">
+                        <input type="hidden" name="feed_id" value="{{ feed.id }}">
+                        <input type="hidden" name="is_active" value="{{ 0 if feed.is_active else 1 }}">
+                        <button type="submit" class="btn btn-sm">{{ "비활성화" if feed.is_active else "활성화" }}</button>
+                    </form>
                     <form action="/settings/sources/remove" method="post" class="inline"
                           onsubmit="return confirm('삭제하시겠습니까?')">
-                        <input type="hidden" name="url" value="{{ url }}">
+                        <input type="hidden" name="feed_id" value="{{ feed.id }}">
                         <button type="submit" class="btn btn-sm btn-danger">삭제</button>
                     </form>
                 </td>

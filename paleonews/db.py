@@ -73,6 +73,15 @@ class Database:
                 content    TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS feeds (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                url        TEXT UNIQUE NOT NULL,
+                title      TEXT,
+                is_active  BOOLEAN NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
         """)
         self.conn.commit()
         self._migrate()
@@ -241,6 +250,68 @@ class Database:
         self.conn.execute("DELETE FROM memories WHERE user_id = ?", (user_id,))
         self.conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         self.conn.commit()
+
+    # --- Feed CRUD ---
+
+    def add_feed(self, url: str, title: str | None = None) -> int:
+        """Add a new feed source. Raises sqlite3.IntegrityError on duplicate URL."""
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = self.conn.execute(
+            """INSERT INTO feeds (url, title, is_active, created_at, updated_at)
+               VALUES (?, ?, 1, ?, ?)""",
+            (url, title, now, now),
+        )
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def get_active_feeds(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM feeds WHERE is_active = 1 ORDER BY id"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_all_feeds(self) -> list[dict]:
+        rows = self.conn.execute("SELECT * FROM feeds ORDER BY id").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_feed_by_url(self, url: str) -> dict | None:
+        row = self.conn.execute("SELECT * FROM feeds WHERE url = ?", (url,)).fetchone()
+        return dict(row) if row else None
+
+    def remove_feed(self, feed_id: int):
+        self.conn.execute("DELETE FROM feeds WHERE id = ?", (feed_id,))
+        self.conn.commit()
+
+    def set_feed_active(self, feed_id: int, is_active: bool):
+        now = datetime.now(timezone.utc).isoformat()
+        self.conn.execute(
+            "UPDATE feeds SET is_active = ?, updated_at = ? WHERE id = ?",
+            (is_active, now, feed_id),
+        )
+        self.conn.commit()
+
+    def has_any_feeds(self) -> bool:
+        return self.conn.execute("SELECT COUNT(*) FROM feeds").fetchone()[0] > 0
+
+    def migrate_feeds_from_file(self, sources_file: str) -> int:
+        """One-time migration: import URLs from a sources.txt-style file
+        if the feeds table is empty. Returns count imported (0 if skipped)."""
+        from pathlib import Path
+        if self.has_any_feeds():
+            return 0
+        path = Path(sources_file)
+        if not path.exists():
+            return 0
+        urls = [line.strip() for line in path.read_text().splitlines()
+                if line.strip() and not line.startswith("#")]
+        count = 0
+        for url in urls:
+            try:
+                self.add_feed(url)
+                count += 1
+            except sqlite3.IntegrityError:
+                pass
+        return count
 
     # --- Memory methods ---
 
