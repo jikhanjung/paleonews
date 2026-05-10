@@ -4,13 +4,91 @@
 <h1 style="margin-bottom: 1.5rem;">설정</h1>
 
 <div class="card">
+    <h2>모델 설정</h2>
+    {% set current_filter = config.filter.llm_filter.model %}
+    {% set current_summarizer = config.summarizer.model %}
+    {% set current_chat = config.get("chat", {}).get("model", "claude-haiku-4-5-20251001") %}
+    {% set current_provider = config.llm.provider %}
+    <form action="/settings/models/update" method="post">
+        <table>
+            <tr>
+                <th style="width:200px;">LLM 프로바이더</th>
+                <td>
+                    <select name="llm_provider">
+                        {% for opt in ["anthropic", "openai", "claude_code"] %}
+                        <option value="{{ opt }}" {% if current_provider == opt %}selected{% endif %}>{{ opt }}</option>
+                        {% endfor %}
+                    </select>
+                </td>
+            </tr>
+            <tr>
+                <th>필터 모델</th>
+                <td>
+                    {% if available_models %}
+                    <select name="filter_model" style="min-width: 360px;">
+                        {% for m in available_models %}
+                        <option value="{{ m.id }}" {% if current_filter == m.id %}selected{% endif %}>{{ m.display_name }} — {{ m.id }}</option>
+                        {% endfor %}
+                        {% if current_filter not in available_models|map(attribute="id")|list %}
+                        <option value="{{ current_filter }}" selected>{{ current_filter }} (legacy)</option>
+                        {% endif %}
+                    </select>
+                    {% else %}
+                    <input type="text" name="filter_model" value="{{ current_filter }}" style="min-width: 360px;">
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <th>요약 모델</th>
+                <td>
+                    {% if available_models %}
+                    <select name="summarizer_model" style="min-width: 360px;">
+                        {% for m in available_models %}
+                        <option value="{{ m.id }}" {% if current_summarizer == m.id %}selected{% endif %}>{{ m.display_name }} — {{ m.id }}</option>
+                        {% endfor %}
+                        {% if current_summarizer not in available_models|map(attribute="id")|list %}
+                        <option value="{{ current_summarizer }}" selected>{{ current_summarizer }} (legacy)</option>
+                        {% endif %}
+                    </select>
+                    {% else %}
+                    <input type="text" name="summarizer_model" value="{{ current_summarizer }}" style="min-width: 360px;">
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <th>챗봇 모델</th>
+                <td>
+                    {% if available_models %}
+                    <select name="chat_model" style="min-width: 360px;">
+                        {% for m in available_models %}
+                        <option value="{{ m.id }}" {% if current_chat == m.id %}selected{% endif %}>{{ m.display_name }} — {{ m.id }}</option>
+                        {% endfor %}
+                        {% if current_chat not in available_models|map(attribute="id")|list %}
+                        <option value="{{ current_chat }}" selected>{{ current_chat }} (legacy)</option>
+                        {% endif %}
+                    </select>
+                    {% else %}
+                    <input type="text" name="chat_model" value="{{ current_chat }}" style="min-width: 360px;">
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <td colspan="2">
+                    <button type="submit" class="btn btn-primary">저장</button>
+                    <span class="text-muted" style="margin-left: 1rem;">변경 사항은 다음 cron 실행부터 즉시 반영됩니다. Telegram 봇 챗 모델 적용은 컨테이너 재시작이 필요합니다.</span>
+                </td>
+            </tr>
+        </table>
+    </form>
+    {% if not available_models %}
+    <p class="text-muted mt-1">⚠ Anthropic 모델 카탈로그를 불러올 수 없어 자유 입력 모드입니다 (ANTHROPIC_API_KEY 누락 또는 네트워크 오류).</p>
+    {% endif %}
+</div>
+
+<div class="card">
     <h2>시스템 설정</h2>
     <table>
-        <tr><th style="width:200px;">LLM 프로바이더</th><td>{{ config.llm.provider }}</td></tr>
-        <tr><th>필터 모델</th><td>{{ config.filter.llm_filter.model }}</td></tr>
-        <tr><th>요약 모델</th><td>{{ config.summarizer.model }}</td></tr>
-        <tr><th>챗봇 모델</th><td>{{ config.get("chat", {}).get("model", "claude-haiku-4-5-20251001") }}</td></tr>
-        <tr><th>DB 경로</th><td><code>{{ config.db_path }}</code></td></tr>
+        <tr><th style="width:200px;">DB 경로</th><td><code>{{ config.db_path }}</code></td></tr>
         <tr><th>로그 레벨</th><td>{{ config.logging.level }}</td></tr>
         <tr>
             <th>채널</th>

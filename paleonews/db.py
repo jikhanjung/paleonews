@@ -82,6 +82,12 @@ class Database:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key        TEXT PRIMARY KEY,
+                value      TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
         """)
         self.conn.commit()
         self._migrate()
@@ -292,6 +298,31 @@ class Database:
 
     def has_any_feeds(self) -> bool:
         return self.conn.execute("SELECT COUNT(*) FROM feeds").fetchone()[0] > 0
+
+    # --- App settings (key/value overrides for config.yaml) ---
+
+    def get_setting(self, key: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row else None
+
+    def set_setting(self, key: str, value: str):
+        now = datetime.now(timezone.utc).isoformat()
+        self.conn.execute(
+            """INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at""",
+            (key, value, now),
+        )
+        self.conn.commit()
+
+    def get_all_settings(self) -> dict[str, str]:
+        rows = self.conn.execute("SELECT key, value FROM app_settings").fetchall()
+        return {r["key"]: r["value"] for r in rows}
+
+    def delete_setting(self, key: str):
+        self.conn.execute("DELETE FROM app_settings WHERE key = ?", (key,))
+        self.conn.commit()
 
     def migrate_feeds_from_file(self, sources_file: str) -> int:
         """One-time migration: import URLs from a sources.txt-style file

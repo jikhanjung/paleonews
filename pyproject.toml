@@ -1,6 +1,6 @@
 [project]
 name = "paleonews"
-version = "0.2.5"
+version = "0.2.6"
 description = "Paleontology news aggregator: RSS collection, filtering, summarization, and delivery"
 requires-python = ">=3.11"
 

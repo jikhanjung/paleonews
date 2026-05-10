@@ -11,7 +11,7 @@ from fastapi import FastAPI, Request, Form, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
-from .config import load_config
+from .config import load_config, apply_settings_overlay
 from .db import Database
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,9 @@ app = FastAPI(title="PaleoNews Admin")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 _db: Database | None = None
-_config: dict | None = None
+_yaml_config: dict | None = None
+_models_cache: tuple[float, list[dict]] | None = None
+_MODELS_CACHE_TTL = 3600  # seconds
 
 # Pipeline execution state
 _pipeline_status = {"running": False, "last_result": None}
@@ -29,17 +31,47 @@ _pipeline_status = {"running": False, "last_result": None}
 def get_db() -> Database:
     global _db
     if _db is None:
-        config = get_config()
+        config = get_config_yaml_only()
         _db = Database(config.get("db_path", "paleonews.db"))
         _db.init_tables()
     return _db
 
 
+def get_config_yaml_only() -> dict:
+    """Load yaml config only (no DB overlay). Used during DB initialization
+    to avoid a chicken-and-egg loop."""
+    global _yaml_config
+    if _yaml_config is None:
+        _yaml_config = load_config()
+    return _yaml_config
+
+
 def get_config() -> dict:
-    global _config
-    if _config is None:
-        _config = load_config()
-    return _config
+    """Return yaml config with current DB overrides overlaid.
+    Re-overlays each call so UI changes are reflected immediately."""
+    yaml_cfg = get_config_yaml_only()
+    overrides = get_db().get_all_settings()
+    return apply_settings_overlay(yaml_cfg, overrides)
+
+
+def get_available_models() -> list[dict]:
+    """Fetch the Anthropic model catalogue, cached for 1 hour. Returns
+    [{"id": ..., "display_name": ...}, ...]. Empty on failure (network /
+    missing API key) — UI then falls back to free-text input."""
+    global _models_cache
+    import time
+    if _models_cache and time.time() - _models_cache[0] < _MODELS_CACHE_TTL:
+        return _models_cache[1]
+    try:
+        from anthropic import Anthropic
+        client = Anthropic()
+        result = client.models.list(limit=50)
+        models = [{"id": m.id, "display_name": m.display_name} for m in result.data]
+        _models_cache = (time.time(), models)
+        return models
+    except Exception as e:
+        logger.warning("Failed to fetch model catalogue: %s", e)
+        return []
 
 
 # --- Dashboard ---
@@ -272,10 +304,27 @@ async def users_toggle_admin(user_id: int):
 async def settings_page(request: Request):
     config = get_config()
     feeds = get_db().get_all_feeds()
+    available_models = get_available_models()
     return templates.TemplateResponse(request, "settings.html", {
         "config": config,
         "feeds": feeds,
+        "available_models": available_models,
     })
+
+
+@app.post("/settings/models/update")
+async def settings_models_update(
+    llm_provider: str = Form(...),
+    filter_model: str = Form(...),
+    summarizer_model: str = Form(...),
+    chat_model: str = Form(...),
+):
+    db = get_db()
+    db.set_setting("llm.provider", llm_provider.strip())
+    db.set_setting("filter.llm_filter.model", filter_model.strip())
+    db.set_setting("summarizer.model", summarizer_model.strip())
+    db.set_setting("chat.model", chat_model.strip())
+    return RedirectResponse("/settings", status_code=303)
 
 
 @app.post("/settings/sources/add")

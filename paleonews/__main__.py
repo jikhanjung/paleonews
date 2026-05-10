@@ -8,7 +8,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from .config import load_config
+from .config import load_config, apply_settings_overlay
 from .llm import create_llm_client
 from .db import Database
 from .fetcher import fetch_all
@@ -510,6 +510,9 @@ def main():
         imported = db.migrate_feeds_from_file(sources_file)
         if imported:
             logger.info("Imported %d feeds from %s into DB", imported, sources_file)
+
+    # Apply DB-stored overrides on top of yaml config (models, provider, etc.)
+    config = apply_settings_overlay(config, db.get_all_settings())
 
     try:
         if args.command == "bot":
