@@ -36,7 +36,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = update.effective_user.username
     display_name = update.effective_user.full_name
 
-    existing = db.get_user_by_chat_id(chat_id)
+    existing = db.get_user_by_telegram_id(chat_id)
     if existing:
         if not existing["is_active"]:
             db.update_user_active(existing["id"], True)
@@ -52,7 +52,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "구독을 해제하려면 /stop 을 사용하세요."
             )
     else:
-        db.add_user(chat_id, username=username, display_name=display_name)
+        db.add_user(telegram_chat_id=chat_id, username=username, display_name=display_name)
         await update.message.reply_text(
             "🦴 PaleoNews에 오신 것을 환영합니다!\n\n"
             "고생물학 뉴스 브리핑을 매일 받으실 수 있습니다.\n"
@@ -74,7 +74,7 @@ async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db: Database = context.bot_data["db"]
     chat_id = str(update.effective_chat.id)
 
-    user = db.get_user_by_chat_id(chat_id)
+    user = db.get_user_by_telegram_id(chat_id)
     if user and user["is_active"]:
         db.update_user_active(user["id"], False)
         await update.message.reply_text(
@@ -91,7 +91,7 @@ async def cmd_keywords(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db: Database = context.bot_data["db"]
     chat_id = str(update.effective_chat.id)
 
-    user = db.get_user_by_chat_id(chat_id)
+    user = db.get_user_by_telegram_id(chat_id)
     if not user:
         await update.message.reply_text("먼저 /start 로 구독해주세요.")
         return
@@ -129,7 +129,7 @@ async def cmd_memories(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db: Database = context.bot_data["db"]
     chat_id = str(update.effective_chat.id)
 
-    user = db.get_user_by_chat_id(chat_id)
+    user = db.get_user_by_telegram_id(chat_id)
     if not user:
         await update.message.reply_text("먼저 /start 로 구독해주세요.")
         return
@@ -151,7 +151,7 @@ async def cmd_forget(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db: Database = context.bot_data["db"]
     chat_id = str(update.effective_chat.id)
 
-    user = db.get_user_by_chat_id(chat_id)
+    user = db.get_user_by_telegram_id(chat_id)
     if not user:
         await update.message.reply_text("먼저 /start 로 구독해주세요.")
         return
@@ -186,12 +186,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
 
     # Auto-register if not a user
-    user = db.get_user_by_chat_id(chat_id)
+    user = db.get_user_by_telegram_id(chat_id)
     if not user:
         username = update.effective_user.username
         display_name = update.effective_user.full_name
-        db.add_user(chat_id, username=username, display_name=display_name)
-        user = db.get_user_by_chat_id(chat_id)
+        db.add_user(telegram_chat_id=chat_id, username=username, display_name=display_name)
+        user = db.get_user_by_telegram_id(chat_id)
 
     # Build memory context
     memories = db.get_memories(user["id"])

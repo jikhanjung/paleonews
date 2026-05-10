@@ -19,9 +19,9 @@ def test_add_and_get_user():
     uid = db.add_user("12345", username="testuser", display_name="Test User")
     assert uid is not None
 
-    user = db.get_user_by_chat_id("12345")
+    user = db.get_user_by_telegram_id("12345")
     assert user is not None
-    assert user["chat_id"] == "12345"
+    assert user["telegram_chat_id"] == "12345"
     assert user["username"] == "testuser"
     assert user["is_active"] == 1
     assert user["is_admin"] == 0
@@ -49,7 +49,7 @@ def test_get_active_users():
 
     active = db.get_active_users()
     assert len(active) == 2
-    chat_ids = {u["chat_id"] for u in active}
+    chat_ids = {u["telegram_chat_id"] for u in active}
     assert chat_ids == {"111", "222"}
     db.close()
 
@@ -86,7 +86,7 @@ def test_seed_admin():
     admin_id = db.seed_admin("99999", username="admin")
     user = db.get_user(admin_id)
     assert user["is_admin"] == 1
-    assert user["chat_id"] == "99999"
+    assert user["telegram_chat_id"] == "99999"
 
     # Calling again should not create duplicate
     admin_id2 = db.seed_admin("99999")

@@ -8,9 +8,9 @@ logger = logging.getLogger(__name__)
 
 
 class TelegramDispatcher(BaseDispatcher):
-    def __init__(self, bot_token: str, chat_id: str, max_length: int = 4096):
+    def __init__(self, bot_token: str, telegram_chat_id: str, max_length: int = 4096):
         self.bot = Bot(token=bot_token)
-        self.chat_id = chat_id
+        self.telegram_chat_id = telegram_chat_id
         self.max_length = max_length
 
     def split_message(self, text: str) -> list[str]:
@@ -43,10 +43,10 @@ class TelegramDispatcher(BaseDispatcher):
         try:
             for chunk in chunks:
                 await self.bot.send_message(
-                    chat_id=self.chat_id,
+                    chat_id=self.telegram_chat_id,
                     text=chunk,
                 )
-            logger.info("Sent %d message(s) to Telegram chat %s", len(chunks), self.chat_id)
+            logger.info("Sent %d message(s) to Telegram chat %s", len(chunks), self.telegram_chat_id)
             return True
         except Exception:
             logger.exception("Failed to send Telegram message")

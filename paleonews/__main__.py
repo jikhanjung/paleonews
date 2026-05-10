@@ -118,11 +118,13 @@ def cmd_send(db: Database, config: dict):
             users = db.get_active_users()
             if not users and admin_chat_id:
                 # Fallback: no users in DB yet, use env var directly
-                users = [{"id": None, "chat_id": admin_chat_id, "keywords": None}]
+                users = [{"id": None, "telegram_chat_id": admin_chat_id, "keywords": None}]
 
             for user in users:
                 user_id = user["id"]
-                chat_id = user["chat_id"]
+                chat_id = user["telegram_chat_id"]
+                if not chat_id or not user.get("notify_telegram", True):
+                    continue  # Skip users without Telegram or with notifications disabled
 
                 if user_id is not None:
                     unsent = db.get_unsent_for_user("telegram", user_id)
@@ -260,6 +262,7 @@ def cmd_users(db: Database, args):
         for u in users:
             status = "활성" if u["is_active"] else "비활성"
             admin = " [관리자]" if u["is_admin"] else ""
+            tg_str = f" telegram={u['telegram_chat_id']}" if u.get("telegram_chat_id") else ""
             email_str = f" email={u['email']}" if u.get("email") else ""
             kw = u["keywords"]
             if kw:
@@ -267,84 +270,80 @@ def cmd_users(db: Database, args):
                 kw_str = f" 키워드: {', '.join(kw_list)}"
             else:
                 kw_str = " 키워드: 전체 수신"
-            print(f"  {u['id']}. chat_id={u['chat_id']}{email_str} ({status}{admin}){kw_str}")
+            name = u.get("display_name") or u.get("username") or ""
+            print(f"  {u['id']}. {name}{tg_str}{email_str} ({status}{admin}){kw_str}")
 
     elif sub == "add":
-        chat_id = args.chat_id
-        existing = db.get_user_by_chat_id(chat_id)
-        if existing:
-            print(f"이미 등록된 사용자입니다: chat_id={chat_id}")
-            return
         name = getattr(args, "name", None)
         email = getattr(args, "email", None)
+        telegram = getattr(args, "telegram", None)
         is_admin = getattr(args, "admin", False)
-        user_id = db.add_user(chat_id, username=name, is_admin=is_admin, email=email)
-        print(f"사용자 추가: id={user_id}, chat_id={chat_id}" + (f", email={email}" if email else ""))
+        if telegram:
+            existing = db.get_user_by_telegram_id(telegram)
+            if existing:
+                print(f"이미 등록된 사용자입니다: telegram={telegram}")
+                return
+        user_id = db.add_user(telegram_chat_id=telegram, username=name, is_admin=is_admin, email=email)
+        print(f"사용자 추가: id={user_id}" + (f", telegram={telegram}" if telegram else "") + (f", email={email}" if email else ""))
 
     elif sub == "remove":
-        chat_id = args.chat_id
-        user = db.get_user_by_chat_id(chat_id)
+        user = db.get_user(args.user_id)
         if not user:
-            print(f"사용자를 찾을 수 없습니다: chat_id={chat_id}")
+            print(f"사용자를 찾을 수 없습니다: id={args.user_id}")
             return
         db.remove_user(user["id"])
-        print(f"사용자 삭제: chat_id={chat_id}")
+        print(f"사용자 삭제: id={args.user_id}")
 
     elif sub == "keywords":
-        chat_id = args.chat_id
-        user = db.get_user_by_chat_id(chat_id)
+        user = db.get_user(args.user_id)
         if not user:
-            print(f"사용자를 찾을 수 없습니다: chat_id={chat_id}")
+            print(f"사용자를 찾을 수 없습니다: id={args.user_id}")
             return
         kw_input = getattr(args, "keywords_list", None)
         if kw_input is None or kw_input == []:
-            # Show current keywords
             kw = db.get_user_keywords(user["id"])
             if kw is None:
-                print(f"chat_id={chat_id}: 전체 수신")
+                print(f"id={args.user_id}: 전체 수신")
             else:
-                print(f"chat_id={chat_id}: {', '.join(kw)}")
+                print(f"id={args.user_id}: {', '.join(kw)}")
         elif kw_input == ["*"]:
             db.update_user_keywords(user["id"], None)
-            print(f"chat_id={chat_id}: 전체 수신으로 변경")
+            print(f"id={args.user_id}: 전체 수신으로 변경")
         else:
             db.update_user_keywords(user["id"], kw_input)
-            print(f"chat_id={chat_id}: 키워드 설정 → {', '.join(kw_input)}")
+            print(f"id={args.user_id}: 키워드 설정 → {', '.join(kw_input)}")
 
     elif sub == "email":
-        chat_id = args.chat_id
-        user = db.get_user_by_chat_id(chat_id)
+        user = db.get_user(args.user_id)
         if not user:
-            print(f"사용자를 찾을 수 없습니다: chat_id={chat_id}")
+            print(f"사용자를 찾을 수 없습니다: id={args.user_id}")
             return
         email_addr = getattr(args, "email_addr", None)
         if email_addr is None:
             current = user.get("email") or "없음"
-            print(f"chat_id={chat_id}: email={current}")
+            print(f"id={args.user_id}: email={current}")
         elif email_addr.lower() == "none":
             db.update_user_email(user["id"], None)
-            print(f"chat_id={chat_id}: 이메일 삭제")
+            print(f"id={args.user_id}: 이메일 삭제")
         else:
             db.update_user_email(user["id"], email_addr)
-            print(f"chat_id={chat_id}: email={email_addr}")
+            print(f"id={args.user_id}: email={email_addr}")
 
     elif sub == "activate":
-        chat_id = args.chat_id
-        user = db.get_user_by_chat_id(chat_id)
+        user = db.get_user(args.user_id)
         if not user:
-            print(f"사용자를 찾을 수 없습니다: chat_id={chat_id}")
+            print(f"사용자를 찾을 수 없습니다: id={args.user_id}")
             return
         db.update_user_active(user["id"], True)
-        print(f"사용자 활성화: chat_id={chat_id}")
+        print(f"사용자 활성화: id={args.user_id}")
 
     elif sub == "deactivate":
-        chat_id = args.chat_id
-        user = db.get_user_by_chat_id(chat_id)
+        user = db.get_user(args.user_id)
         if not user:
-            print(f"사용자를 찾을 수 없습니다: chat_id={chat_id}")
+            print(f"사용자를 찾을 수 없습니다: id={args.user_id}")
             return
         db.update_user_active(user["id"], False)
-        print(f"사용자 비활성화: chat_id={chat_id}")
+        print(f"사용자 비활성화: id={args.user_id}")
 
 
 def cmd_sources(config: dict, args):
@@ -464,22 +463,22 @@ def main():
     users_sub = users_parser.add_subparsers(dest="users_command")
     users_sub.add_parser("list", help="List all users")
     user_add = users_sub.add_parser("add", help="Add a user")
-    user_add.add_argument("chat_id", help="Telegram chat ID")
     user_add.add_argument("--name", help="Username / display name")
+    user_add.add_argument("--telegram", help="Telegram chat ID (optional)")
     user_add.add_argument("--email", help="Email address for email dispatch")
     user_add.add_argument("--admin", action="store_true", help="Set as admin")
     user_remove = users_sub.add_parser("remove", help="Remove a user")
-    user_remove.add_argument("chat_id", help="Telegram chat ID")
+    user_remove.add_argument("user_id", type=int, help="User ID")
     user_kw = users_sub.add_parser("keywords", help="Set user keywords (use * for all)")
-    user_kw.add_argument("chat_id", help="Telegram chat ID")
+    user_kw.add_argument("user_id", type=int, help="User ID")
     user_kw.add_argument("keywords_list", nargs="*", help="Keywords (omit to show, * for all)")
     user_email = users_sub.add_parser("email", help="Set user email address")
-    user_email.add_argument("chat_id", help="Telegram chat ID")
+    user_email.add_argument("user_id", type=int, help="User ID")
     user_email.add_argument("email_addr", nargs="?", help="Email address (omit to show, 'none' to clear)")
     user_activate = users_sub.add_parser("activate", help="Activate a user")
-    user_activate.add_argument("chat_id", help="Telegram chat ID")
+    user_activate.add_argument("user_id", type=int, help="User ID")
     user_deactivate = users_sub.add_parser("deactivate", help="Deactivate a user")
-    user_deactivate.add_argument("chat_id", help="Telegram chat ID")
+    user_deactivate.add_argument("user_id", type=int, help="User ID")
 
     # Telegram bot daemon
     subparsers.add_parser("bot", help="Run Telegram bot daemon")

@@ -16,8 +16,8 @@ RUN pip install --no-cache-dir .
 
 # Use /app/data for DB, /app/logs for logs
 RUN mkdir -p /app/data /app/logs && \
-    sed -i 's|db_path:.*|db_path: "data/paleonews.db"|' config.yaml && \
-    sed -i 's|file:.*|file: "logs/paleonews.log"|' config.yaml
+    sed -i 's|^db_path:.*|db_path: "data/paleonews.db"|' config.yaml && \
+    sed -i 's|^  file:.*|  file: "logs/paleonews.log"|' config.yaml
 
 VOLUME ["/app/data", "/app/logs"]
 

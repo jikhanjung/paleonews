@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}PaleoNews - {{ user.display_name or user.username or user.telegram_chat_id or "사용자" }}{% endblock %}
+{% block content %}
+<div style="display:flex; align-items:center; gap:1rem; margin-bottom:1.5rem;">
+    <a href="/users" class="btn btn-outline">&larr; 목록</a>
+    <h1 style="margin:0;">사용자 상세</h1>
+    {% if user.is_active %}
+    <span class="badge badge-green">활성</span>
+    {% else %}
+    <span class="badge badge-red">비활성</span>
+    {% endif %}
+    {% if user.is_admin %}
+    <span class="badge badge-blue">관리자</span>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>정보 편집</h2>
+    <form action="/users/{{ user.id }}/edit" method="post">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+            <div class="field">
+                <label>Telegram Chat ID</label>
+                <div style="display:flex; gap:0.5rem; align-items:center;">
+                    <input type="text" name="telegram_chat_id" value="{{ user.telegram_chat_id or '' }}" placeholder="선택사항" style="flex:1;">
+                    {% if user.telegram_chat_id %}
+                    <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.85rem; white-space:nowrap;">
+                        <input type="checkbox" name="notify_telegram" value="true" {% if user.notify_telegram %}checked{% endif %}>
+                        수신
+                    </label>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="field">
+                <label>사용자명</label>
+                <input type="text" name="username" value="{{ user.username or '' }}" placeholder="username">
+            </div>
+            <div class="field">
+                <label>표시 이름</label>
+                <input type="text" name="display_name" value="{{ user.display_name or '' }}" placeholder="표시 이름">
+            </div>
+            <div class="field">
+                <label>이메일</label>
+                <div style="display:flex; gap:0.5rem; align-items:center;">
+                    <input type="email" name="email" value="{{ user.email or '' }}" placeholder="user@example.com" style="flex:1;">
+                    {% if user.email %}
+                    <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.85rem; white-space:nowrap;">
+                        <input type="checkbox" name="notify_email" value="true" {% if user.notify_email %}checked{% endif %}>
+                        수신
+                    </label>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="field">
+                <label>키워드</label>
+                <input type="text" name="keywords"
+                       value="{% if user.keywords_list %}{{ user.keywords_list | join(' ') }}{% endif %}"
+                       placeholder="공백으로 구분 (* 또는 비워두면 전체 수신)">
+            </div>
+            <div class="field" style="display:flex; gap:2rem; align-items:end; padding-bottom:0.4rem;">
+                <label style="display:flex; align-items:center; gap:0.4rem;">
+                    <input type="checkbox" name="is_active" value="true" {% if user.is_active %}checked{% endif %}>
+                    활성
+                </label>
+                <label style="display:flex; align-items:center; gap:0.4rem;">
+                    <input type="checkbox" name="is_admin" value="true" {% if user.is_admin %}checked{% endif %}>
+                    관리자
+                </label>
+            </div>
+        </div>
+        <div style="margin-top:1.2rem; display:flex; gap:0.5rem;">
+            <button type="submit" class="btn btn-primary">저장</button>
+            <a href="/users/{{ user.id }}" class="btn btn-outline">취소</a>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    <h2>기본 정보</h2>
+    <table>
+        <tr><th style="width:120px;">ID</th><td>{{ user.id }}</td></tr>
+        <tr><th>Telegram</th><td>{% if user.telegram_chat_id %}<code>{{ user.telegram_chat_id }}</code>{% else %}<span class="text-muted">-</span>{% endif %}</td></tr>
+        <tr><th>사용자명</th><td>{{ user.username or "-" }}</td></tr>
+        <tr><th>표시 이름</th><td>{{ user.display_name or "-" }}</td></tr>
+        <tr><th>이메일</th><td>{{ user.email or "-" }}</td></tr>
+        <tr><th>키워드</th><td>{% if user.keywords_list %}{{ user.keywords_list | join(", ") }}{% else %}<span class="text-muted">전체 수신</span>{% endif %}</td></tr>
+        <tr><th>가입일</th><td>{{ user.created_at[:19] }}</td></tr>
+        <tr><th>수정일</th><td>{{ user.updated_at[:19] }}</td></tr>
+    </table>
+</div>
+
+{% if user.memories %}
+<div class="card">
+    <h2>기억 ({{ user.memories | length }}건)</h2>
+    <table>
+        <thead>
+            <tr><th style="width:60px;">ID</th><th>내용</th><th style="width:160px;">생성일</th></tr>
+        </thead>
+        <tbody>
+            {% for m in user.memories %}
+            <tr>
+                <td>{{ m.id }}</td>
+                <td style="white-space:pre-wrap; font-size:0.85rem;">{{ m.content }}</td>
+                <td class="text-muted">{{ m.created_at[:19] }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% if dispatches %}
+<div class="card">
+    <h2>최근 발송 내역 (최대 20건)</h2>
+    <table>
+        <thead>
+            <tr><th>채널</th><th>기사 ID</th><th>상태</th><th>발송일</th></tr>
+        </thead>
+        <tbody>
+            {% for d in dispatches %}
+            <tr>
+                <td>{{ d.channel }}</td>
+                <td>{{ d.article_id }}</td>
+                <td>
+                    {% if d.status == 'sent' %}
+                    <span class="badge badge-green">성공</span>
+                    {% else %}
+                    <span class="badge badge-red">{{ d.status }}</span>
+                    {% endif %}
+                </td>
+                <td class="text-muted">{{ d.sent_at[:19] if d.sent_at else "-" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<div class="card" style="border: 1px solid #f8d7da;">
+    <h2 style="color:#721c24; border-color:#f5c6cb;">위험 영역</h2>
+    <form action="/users/{{ user.id }}/delete" method="post" class="inline"
+          onsubmit="return confirm('정말 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')">
+        <button type="submit" class="btn btn-danger">사용자 삭제</button>
+    </form>
+</div>
+
+<style>
+    .field { display: flex; flex-direction: column; gap: 0.3rem; }
+    .field label { font-size: 0.85rem; font-weight: 600; color: #555; }
+    .field input[type="text"],
+    .field input[type="email"] { padding: 0.5rem 0.7rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.9rem; }
+</style>
+{% endblock %}

@@ -10,9 +10,9 @@ case "$MODE" in
 
     # 1) cron 설정 및 시작
     SCHEDULE="${PIPELINE_CRON:-0 23 * * *}"
-    printenv | grep -Ev '^(BASHOPTS|BASH_VERSINFO|EUID|PPID|SHELLOPTS|UID|_)=' > /app/env.sh
-    sed -i 's/^/export /' /app/env.sh
-    echo "$SCHEDULE bash -c 'source /app/env.sh && python -m paleonews run >> /proc/1/fd/1 2>&1'" > /etc/cron.d/paleonews
+    export -p | grep -Ev '(BASHOPTS|BASH_VERSINFO|EUID|PPID|SHELLOPTS|UID|_=)' > /app/env.sh
+    echo "SHELL=/bin/bash" > /etc/cron.d/paleonews
+    echo "$SCHEDULE root /bin/bash -c 'cd /app && source /app/env.sh && python -m paleonews run >> /proc/1/fd/1 2>&1'" >> /etc/cron.d/paleonews
     echo "" >> /etc/cron.d/paleonews
     chmod 0644 /etc/cron.d/paleonews
     crontab /etc/cron.d/paleonews
@@ -31,9 +31,9 @@ case "$MODE" in
     ;;
   cron)
     SCHEDULE="${PIPELINE_CRON:-0 23 * * *}"
-    printenv | grep -Ev '^(BASHOPTS|BASH_VERSINFO|EUID|PPID|SHELLOPTS|UID|_)=' > /app/env.sh
-    sed -i 's/^/export /' /app/env.sh
-    echo "$SCHEDULE bash -c 'source /app/env.sh && python -m paleonews run >> /proc/1/fd/1 2>&1'" > /etc/cron.d/paleonews
+    export -p | grep -Ev '(BASHOPTS|BASH_VERSINFO|EUID|PPID|SHELLOPTS|UID|_=)' > /app/env.sh
+    echo "SHELL=/bin/bash" > /etc/cron.d/paleonews
+    echo "$SCHEDULE root /bin/bash -c 'cd /app && source /app/env.sh && python -m paleonews run >> /proc/1/fd/1 2>&1'" >> /etc/cron.d/paleonews
     echo "" >> /etc/cron.d/paleonews
     chmod 0644 /etc/cron.d/paleonews
     crontab /etc/cron.d/paleonews

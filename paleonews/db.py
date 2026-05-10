@@ -54,13 +54,15 @@ class Database:
 
             CREATE TABLE IF NOT EXISTS users (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                chat_id      TEXT UNIQUE NOT NULL,
+                telegram_chat_id TEXT UNIQUE,
                 username     TEXT,
                 display_name TEXT,
                 email        TEXT,
                 is_active    BOOLEAN NOT NULL DEFAULT 1,
                 is_admin     BOOLEAN NOT NULL DEFAULT 0,
                 keywords     TEXT,
+                notify_telegram BOOLEAN NOT NULL DEFAULT 1,
+                notify_email    BOOLEAN NOT NULL DEFAULT 1,
                 created_at   TEXT NOT NULL,
                 updated_at   TEXT NOT NULL
             );
@@ -95,9 +97,39 @@ class Database:
             self.conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
             self.conn.commit()
 
-    def seed_admin(self, chat_id: str, username: str | None = None):
+        # Migrate: rename chat_id → telegram_chat_id and make nullable
+        if "chat_id" in user_cols and "telegram_chat_id" not in user_cols:
+            self.conn.execute("ALTER TABLE users RENAME COLUMN chat_id TO telegram_chat_id")
+            self.conn.commit()
+            # Recreate table to remove NOT NULL constraint
+            self.conn.executescript("""
+                CREATE TABLE users_new (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    telegram_chat_id TEXT UNIQUE,
+                    username     TEXT,
+                    display_name TEXT,
+                    email        TEXT,
+                    is_active    BOOLEAN NOT NULL DEFAULT 1,
+                    is_admin     BOOLEAN NOT NULL DEFAULT 0,
+                    keywords     TEXT,
+                    created_at   TEXT NOT NULL,
+                    updated_at   TEXT NOT NULL
+                );
+                INSERT INTO users_new SELECT * FROM users;
+                DROP TABLE users;
+                ALTER TABLE users_new RENAME TO users;
+            """)
+
+        # Migrate: add notify_telegram, notify_email columns
+        user_cols = [row[1] for row in self.conn.execute("PRAGMA table_info(users)")]  # refresh after possible table rebuild
+        if "notify_telegram" not in user_cols:
+            self.conn.execute("ALTER TABLE users ADD COLUMN notify_telegram BOOLEAN NOT NULL DEFAULT 1")
+            self.conn.execute("ALTER TABLE users ADD COLUMN notify_email BOOLEAN NOT NULL DEFAULT 1")
+            self.conn.commit()
+
+    def seed_admin(self, telegram_chat_id: str, username: str | None = None):
         """Seed admin user from TELEGRAM_CHAT_ID. Backfills existing telegram dispatches."""
-        existing = self.get_user_by_chat_id(chat_id)
+        existing = self.get_user_by_telegram_id(telegram_chat_id)
         if existing:
             if not existing["is_admin"]:
                 self.conn.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (existing["id"],))
@@ -106,9 +138,9 @@ class Database:
 
         now = datetime.now(timezone.utc).isoformat()
         cursor = self.conn.execute(
-            """INSERT INTO users (chat_id, username, display_name, is_active, is_admin, keywords, created_at, updated_at)
+            """INSERT INTO users (telegram_chat_id, username, display_name, is_active, is_admin, keywords, created_at, updated_at)
                VALUES (?, ?, ?, 1, 1, NULL, ?, ?)""",
-            (chat_id, username, username, now, now),
+            (telegram_chat_id, username, username, now, now),
         )
         self.conn.commit()
         admin_id = cursor.lastrowid
@@ -123,15 +155,15 @@ class Database:
 
     # --- User CRUD ---
 
-    def add_user(self, chat_id: str, username: str | None = None,
+    def add_user(self, telegram_chat_id: str | None = None, username: str | None = None,
                  display_name: str | None = None, is_admin: bool = False,
                  email: str | None = None) -> int:
         """Add a new user. Returns user id."""
         now = datetime.now(timezone.utc).isoformat()
         cursor = self.conn.execute(
-            """INSERT INTO users (chat_id, username, display_name, email, is_active, is_admin, keywords, created_at, updated_at)
+            """INSERT INTO users (telegram_chat_id, username, display_name, email, is_active, is_admin, keywords, created_at, updated_at)
                VALUES (?, ?, ?, ?, 1, ?, NULL, ?, ?)""",
-            (chat_id, username, display_name or username, email, is_admin, now, now),
+            (telegram_chat_id or None, username, display_name or username, email, is_admin, now, now),
         )
         self.conn.commit()
         return cursor.lastrowid
@@ -145,14 +177,14 @@ class Database:
         self.conn.commit()
 
     def get_email_users(self) -> list[dict]:
-        """Get active users with email addresses."""
+        """Get active users with email addresses and email notifications enabled."""
         rows = self.conn.execute(
-            "SELECT * FROM users WHERE is_active = 1 AND email IS NOT NULL AND email != ''"
+            "SELECT * FROM users WHERE is_active = 1 AND email IS NOT NULL AND email != '' AND notify_email = 1"
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def get_user_by_chat_id(self, chat_id: str) -> dict | None:
-        row = self.conn.execute("SELECT * FROM users WHERE chat_id = ?", (chat_id,)).fetchone()
+    def get_user_by_telegram_id(self, telegram_chat_id: str) -> dict | None:
+        row = self.conn.execute("SELECT * FROM users WHERE telegram_chat_id = ?", (telegram_chat_id,)).fetchone()
         return dict(row) if row else None
 
     def get_user(self, user_id: int) -> dict | None:
@@ -191,6 +223,19 @@ class Database:
         if row is None or row["keywords"] is None:
             return None
         return json.loads(row["keywords"])
+
+    def update_user(self, user_id: int, **fields):
+        """Update arbitrary user fields (telegram_chat_id, username, display_name, email, is_active, is_admin)."""
+        allowed = {"telegram_chat_id", "username", "display_name", "email", "is_active", "is_admin", "notify_telegram", "notify_email"}
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not updates:
+            return
+        now = datetime.now(timezone.utc).isoformat()
+        updates["updated_at"] = now
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = list(updates.values()) + [user_id]
+        self.conn.execute(f"UPDATE users SET {set_clause} WHERE id = ?", values)
+        self.conn.commit()
 
     def remove_user(self, user_id: int):
         self.conn.execute("DELETE FROM memories WHERE user_id = ?", (user_id,))

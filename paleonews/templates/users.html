@@ -6,9 +6,9 @@
 <div class="card">
     <h2>사용자 추가</h2>
     <form action="/users/add" method="post" class="form-row">
-        <input type="text" name="chat_id" placeholder="Telegram Chat ID" required>
-        <input type="text" name="name" placeholder="이름 (선택)">
-        <input type="text" name="email" placeholder="이메일 (선택)">
+        <input type="text" name="name" placeholder="이름">
+        <input type="text" name="email" placeholder="이메일">
+        <input type="text" name="telegram_chat_id" placeholder="Telegram Chat ID (선택)">
         <label style="font-size: 0.9rem;">
             <input type="checkbox" name="is_admin" value="true"> 관리자
         </label>
@@ -19,11 +19,15 @@
 <div class="card">
     <h2>사용자 목록 ({{ users | length }}명)</h2>
     {% if users %}
+    <style>
+        tr.user-row { cursor: pointer; transition: background 0.15s; }
+        tr.user-row:hover { background: #eaf2fb; }
+    </style>
     <table>
         <thead>
             <tr>
                 <th>ID</th>
-                <th>Chat ID</th>
+                <th>Telegram</th>
                 <th>이름</th>
                 <th>이메일</th>
                 <th>상태</th>
@@ -31,15 +35,14 @@
                 <th>키워드</th>
                 <th>기억</th>
                 <th>가입일</th>
-                <th>작업</th>
             </tr>
         </thead>
         <tbody>
             {% for u in users %}
-            <tr>
+            <tr class="user-row" onclick="location.href='/users/{{ u.id }}'">
                 <td>{{ u.id }}</td>
-                <td><code>{{ u.chat_id }}</code></td>
-                <td>{{ u.display_name or u.username or "-" }}</td>
+                <td>{% if u.telegram_chat_id %}<code>{{ u.telegram_chat_id }}</code>{% else %}<span class="text-muted">-</span>{% endif %}</td>
+                <td style="font-weight:500;">{{ u.display_name or u.username or "(이름 없음)" }}</td>
                 <td>
                     {% if u.email %}
                     <span style="font-size:0.85rem;">{{ u.email }}</span>
@@ -76,44 +79,6 @@
                     {% endif %}
                 </td>
                 <td class="text-muted">{{ u.created_at[:10] }}</td>
-                <td>
-                    <div class="actions">
-                        <form action="/users/{{ u.id }}/toggle" method="post" class="inline">
-                            <button type="submit" class="btn btn-sm btn-outline">
-                                {% if u.is_active %}비활성화{% else %}활성화{% endif %}
-                            </button>
-                        </form>
-                        <form action="/users/{{ u.id }}/admin" method="post" class="inline">
-                            <button type="submit" class="btn btn-sm btn-outline">
-                                {% if u.is_admin %}관리자 해제{% else %}관리자{% endif %}
-                            </button>
-                        </form>
-                        <form action="/users/{{ u.id }}/delete" method="post" class="inline"
-                              onsubmit="return confirm('정말 삭제하시겠습니까?')">
-                            <button type="submit" class="btn btn-sm btn-danger">삭제</button>
-                        </form>
-                    </div>
-                </td>
-            </tr>
-            <tr>
-                <td colspan="10" style="padding: 0.3rem 0.8rem; background: #fafafa;">
-                    <div style="display:flex; gap:1rem; flex-wrap:wrap;">
-                        <form action="/users/{{ u.id }}/keywords" method="post" class="form-row" style="margin:0; flex:1; min-width:250px;">
-                            <span style="font-size: 0.85rem; color: #666;">키워드:</span>
-                            <input type="text" name="keywords"
-                                   value="{% if u.keywords_list %}{{ u.keywords_list | join(' ') }}{% endif %}"
-                                   placeholder="공백으로 구분 (* = 전체 수신)" style="flex: 1; min-width: 150px;">
-                            <button type="submit" class="btn btn-sm btn-primary">저장</button>
-                        </form>
-                        <form action="/users/{{ u.id }}/email" method="post" class="form-row" style="margin:0; flex:1; min-width:250px;">
-                            <span style="font-size: 0.85rem; color: #666;">이메일:</span>
-                            <input type="email" name="email"
-                                   value="{{ u.email or '' }}"
-                                   placeholder="user@example.com" style="flex: 1; min-width: 150px;">
-                            <button type="submit" class="btn btn-sm btn-primary">저장</button>
-                        </form>
-                    </div>
-                </td>
             </tr>
             {% endfor %}
         </tbody>

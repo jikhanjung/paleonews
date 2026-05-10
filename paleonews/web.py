@@ -143,17 +143,79 @@ async def users_list(request: Request):
 
 @app.post("/users/add")
 async def users_add(
-    chat_id: str = Form(...),
+    telegram_chat_id: str = Form(""),
     name: str = Form(""),
     email: str = Form(""),
     is_admin: bool = Form(False),
 ):
     db = get_db()
-    existing = db.get_user_by_chat_id(chat_id)
-    if not existing:
-        db.add_user(chat_id, username=name or None, is_admin=is_admin,
-                     email=email or None)
+    tg_id = telegram_chat_id.strip() or None
+    if tg_id:
+        existing = db.get_user_by_telegram_id(tg_id)
+        if existing:
+            return RedirectResponse("/users", status_code=303)
+    db.add_user(telegram_chat_id=tg_id, username=name or None, is_admin=is_admin,
+                 email=email or None)
     return RedirectResponse("/users", status_code=303)
+
+
+@app.get("/users/{user_id}", response_class=HTMLResponse)
+async def user_detail(request: Request, user_id: int):
+    db = get_db()
+    user = db.get_user(user_id)
+    if not user:
+        return RedirectResponse("/users", status_code=303)
+    if user["keywords"]:
+        user["keywords_list"] = json.loads(user["keywords"])
+    else:
+        user["keywords_list"] = None
+    user["memories"] = db.get_memories(user_id)
+    dispatches = db.conn.execute(
+        "SELECT d.* FROM dispatches d WHERE d.user_id = ? ORDER BY d.sent_at DESC LIMIT 20",
+        (user_id,),
+    ).fetchall()
+    dispatches = [dict(r) for r in dispatches]
+    return templates.TemplateResponse(request, "user_detail.html", {
+        "user": user,
+        "dispatches": dispatches,
+    })
+
+
+@app.post("/users/{user_id}/edit")
+async def user_edit(
+    user_id: int,
+    telegram_chat_id: str = Form(""),
+    username: str = Form(""),
+    display_name: str = Form(""),
+    email: str = Form(""),
+    keywords: str = Form(""),
+    is_active: bool = Form(False),
+    is_admin: bool = Form(False),
+    notify_telegram: bool = Form(False),
+    notify_email: bool = Form(False),
+):
+    db = get_db()
+    user = db.get_user(user_id)
+    if not user:
+        return RedirectResponse("/users", status_code=303)
+    db.update_user(
+        user_id,
+        telegram_chat_id=telegram_chat_id.strip() or None,
+        username=username.strip() or None,
+        display_name=display_name.strip() or None,
+        email=email.strip() or None,
+        is_active=is_active,
+        is_admin=is_admin,
+        notify_telegram=notify_telegram,
+        notify_email=notify_email,
+    )
+    kw = keywords.strip()
+    if not kw or kw == "*":
+        db.update_user_keywords(user_id, None)
+    else:
+        kw_list = [k.strip() for k in kw.split() if k.strip()]
+        db.update_user_keywords(user_id, kw_list)
+    return RedirectResponse(f"/users/{user_id}", status_code=303)
 
 
 @app.post("/users/{user_id}/toggle")
