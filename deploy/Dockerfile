@@ -2,9 +2,14 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies (lxml + cron)
+# System dependencies: lxml + cron + Node.js (for Claude Code CLI)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libxml2-dev libxslt1-dev cron && \
+    apt-get install -y --no-install-recommends \
+        libxml2-dev libxslt1-dev cron \
+        curl ca-certificates gnupg && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    npm install -g @anthropic-ai/claude-code && \
     rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml .
