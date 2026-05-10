@@ -1,5 +1,10 @@
 llm:
-  provider: "anthropic"    # anthropic 또는 openai
+  provider: "anthropic"    # anthropic | openai | claude_code
+  # claude_code 사용 시 옵션 (provider == claude_code일 때만):
+  #   claude_path: "/usr/local/bin/claude"   # claude 바이너리 경로 (기본: PATH에서 검색)
+  #   bare: false                             # --bare 플래그 (true면 ANTHROPIC_API_KEY 강제)
+  #   timeout: 180                            # 호출당 초 단위 타임아웃
+  #   extra_args: ["--allowedTools", "..."]   # claude CLI에 추가로 넘길 인자
 
 logging:
   level: "INFO"
