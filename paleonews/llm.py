@@ -1,6 +1,7 @@
 """LLM provider abstraction — supports Anthropic SDK, OpenAI SDK, and Claude Code CLI."""
 
 import logging
+import os
 import shutil
 import subprocess
 from abc import ABC, abstractmethod
@@ -56,6 +57,12 @@ class ClaudeCodeClient(LLMClient):
     (either via ANTHROPIC_API_KEY env var with bare=True, or via
     `claude /login` for subscription auth). The CLI does not honor
     a max_tokens parameter, so it is ignored here.
+
+    When bare=False (subscription/OAuth mode), ANTHROPIC_API_KEY is
+    stripped from the subprocess environment so the CLI bills the
+    Claude subscription instead of falling back to API credit billing
+    (which raises "Credit balance is too low" when the key's balance
+    is empty).
     """
 
     def __init__(
@@ -78,6 +85,11 @@ class ClaudeCodeClient(LLMClient):
             cmd += ["--append-system-prompt", system]
         cmd += self.extra_args
         cmd.append(prompt)
+        env = os.environ.copy()
+        if not self.bare:
+            # Force OAuth/subscription billing — an ANTHROPIC_API_KEY in the
+            # environment would otherwise make the CLI bill API credits.
+            env.pop("ANTHROPIC_API_KEY", None)
         try:
             result = subprocess.run(
                 cmd,
@@ -85,6 +97,7 @@ class ClaudeCodeClient(LLMClient):
                 text=True,
                 timeout=self.timeout,
                 check=True,
+                env=env,
             )
         except subprocess.TimeoutExpired as e:
             raise RuntimeError(
