@@ -65,7 +65,7 @@ crawler:
   max_per_run: 20
 
 summarizer:
-  model: "claude-sonnet-4-20250514"
+  model: "claude-sonnet-4-6"
   max_articles_per_run: 20
 
 chat:
