@@ -77,6 +77,7 @@ paleonews web          # FastAPI 웹 Admin UI 실행
 - 가상환경: `~/venv/paleonews`
 - 테스트: `~/venv/paleonews/bin/python -m pytest tests/ -v`
 - PyInstaller 빌드: `entry.py`를 엔트리포인트로 사용
+- 운영 배포: 단일 Docker 컨테이너 `paleonews`(entrypoint `all` 모드 = cron+bot+web 한 컨테이너), 이미지 태그 = pyproject 버전, `cd /srv/paleonews && ./deploy.sh <버전>`으로 빌드·push 후 배포
 
 ## Conventions
 
