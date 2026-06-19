@@ -11,32 +11,41 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Language**: Python 3.11+
 - **RSS Parsing**: feedparser
 - **HTTP**: httpx
-- **LLM**: Claude API (anthropic SDK) — 요약: Sonnet, 필터: Haiku
+- **LLM**: provider 추상화 (`llm.py`) — anthropic | openai | claude_code(CLI). 기본 anthropic, 요약: Sonnet, 필터/챗: Haiku
 - **DB**: SQLite (WAL mode)
 - **HTML Parsing**: readability-lxml
 - **Telegram**: python-telegram-bot
-- **Config**: YAML + .env (python-dotenv)
+- **Web Admin**: FastAPI + Jinja2 (uvicorn)
+- **Config**: YAML + .env (python-dotenv) + DB overlay (`app_settings` 테이블)
+- **Deploy**: Docker + nginx + cron (`deploy/`)
 
 ## Architecture
 
 ```
-sources.txt → Fetcher → DB → Filter(키워드+LLM) → Crawler(본문) → Summarizer(Claude) → Dispatcher(다중채널)
+feeds(DB) → Fetcher → DB → Filter(키워드+LLM) → Crawler(본문) → Summarizer(Claude) → Dispatcher(다중채널)
 ```
 
 파이프라인은 5단계: `fetch → filter → crawl → summarize → send`
 
+설정은 `config.yaml`(베이스) 위에 `app_settings` 테이블 값을 overlay하여 구성. CLI/cron은 프로세스 시작 시 1회, 웹 UI는 매 요청마다 재구성 (`config.py:apply_settings_overlay`).
+
 ## Key Files
 
 - `paleonews/__main__.py` — CLI 엔트리포인트, 파이프라인 통합
-- `paleonews/db.py` — SQLite DB (articles, dispatches, users 테이블)
-- `paleonews/fetcher.py` — RSS 피드 수집, Article dataclass
+- `paleonews/db.py` — SQLite DB (articles, dispatches, users, memories, pipeline_runs, feeds, app_settings 테이블)
+- `paleonews/config.py` — config.yaml 로딩 + DB 설정 overlay
+- `paleonews/llm.py` — LLM provider 추상화 (anthropic/openai/claude_code)
+- `paleonews/fetcher.py` — RSS 피드 수집 (feeds 테이블 기반), Article dataclass
 - `paleonews/filter.py` — 키워드 접두사 매칭 + LLM 2차 필터 + 사용자별 키워드 필터
 - `paleonews/crawler.py` — 기사 본문 크롤링 (readability)
 - `paleonews/summarizer.py` — Claude API 한국어 요약, 브리핑 생성
 - `paleonews/dispatcher/` — Telegram, Email, Webhook(Slack/Discord)
-- `paleonews/bot.py` — Telegram 봇 데몬 (/start, /stop, /keywords)
-- `config.yaml` — 전체 설정 (피드, 키워드, 모델, 채널)
-- `sources.txt` — RSS 피드 URL 목록 (10개)
+- `paleonews/bot.py` — Telegram 봇 데몬 (/start, /stop, /keywords, 챗봇 대화/메모리)
+- `paleonews/web.py` — FastAPI 웹 Admin UI (대시보드, 기사/사용자 관리, 설정)
+- `paleonews/templates/` — Jinja2 템플릿 (dashboard, articles, users, user_detail, settings)
+- `config.yaml` — 베이스 설정 (피드 전용 도메인, 키워드, 모델, 채널, 로깅)
+- `sources.txt` — 레거시 RSS URL 목록 (현재 피드는 DB `feeds` 테이블로 이관됨)
+- `deploy/` — Dockerfile, docker-compose.yml, entrypoint.sh, nginx
 
 ## Commands
 
@@ -54,7 +63,13 @@ paleonews users remove <chat_id>
 paleonews users keywords <chat_id> [keyword ...]  # * = 전체 수신
 paleonews users activate <chat_id>
 paleonews users deactivate <chat_id>
+paleonews users email <chat_id> [email]            # 이메일 주소 설정
+paleonews sources list                             # RSS 피드 소스 목록 (feeds 테이블)
+paleonews sources add <url>
+paleonews sources remove <url>
+paleonews sources activate <url> / deactivate <url>
 paleonews bot          # Telegram 봇 데몬
+paleonews web          # FastAPI 웹 Admin UI 실행
 ```
 
 ## Development
@@ -77,3 +92,8 @@ paleonews bot          # Telegram 봇 데몬
 - Phase 2 완료: LLM 필터, 크롤링, 다중 채널, 에러 알림
 - Phase 3 완료: 로깅 체계화, 모니터링, 피드 소스 관리 CLI
 - Phase 4 완료: 다중 사용자 지원 (users 테이블, 사용자별 키워드 필터, CLI 관리, Telegram 봇 데몬)
+- Phase 5 완료: LLM provider 추상화(anthropic/openai/claude_code), Telegram 챗봇+메모리, FastAPI 웹 Admin UI, 이메일 전송, Docker+nginx 배포
+- 운영 개선 (2026-05): Dockerfile 장애 수정 + config.yaml 호스트 마운트, RSS 소스 DB 이관(feeds 테이블), `app_settings` 기반 설정 overlay + `/settings`에서 provider·모델 편집(드롭다운)
+- Phase 6 (Django 전환): 계획만 수립됨, 미착수 — `devlog/20260324_P06_django_migration_plan.md`
+
+현재 버전: `0.2.6` (pyproject.toml)
