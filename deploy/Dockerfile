@@ -1,23 +1,55 @@
-FROM python:3.12-slim
+# syntax=docker/dockerfile:1
+#
+# Multi-stage build.
+#  - pybuild   : compile/collect Python deps (lxml build headers live here only)
+#  - claudecli : fetch the NATIVE Claude Code binary (no Node.js runtime needed)
+#  - runtime   : slim final image = base + python deps + native claude + cron
+#
+# The Claude Code CLI ships as a self-contained native ELF binary, so the
+# previous Node.js runtime (node ~120MB + npm/node_modules) is unnecessary.
 
+# ---- Stage 1: Python dependencies ----
+FROM python:3.12-slim AS pybuild
 WORKDIR /app
-
-# System dependencies: lxml + cron + Node.js (for Claude Code CLI)
+# Build headers for lxml's source fallback (kept out of the final image).
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        libxml2-dev libxslt1-dev cron \
-        curl ca-certificates gnupg && \
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
-    apt-get install -y --no-install-recommends nodejs && \
-    npm install -g @anthropic-ai/claude-code && \
+        gcc libxml2-dev libxslt1-dev && \
     rm -rf /var/lib/apt/lists/*
-
 COPY pyproject.toml .
 COPY paleonews/ paleonews/
+# Install into an isolated prefix we can copy wholesale into the runtime stage.
+RUN pip install --no-cache-dir --prefix=/install .
+
+# ---- Stage 2: Native Claude Code CLI ----
+FROM python:3.12-slim AS claudecli
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    # Installs the native binary to /root/.local/share/claude/versions/<v>
+    # with a launcher symlink at /root/.local/bin/claude. No Node.js involved.
+    curl -fsSL https://claude.ai/install.sh | bash
+
+# ---- Stage 3: Runtime ----
+FROM python:3.12-slim
+WORKDIR /app
+
+# Runtime-only system deps: cron (scheduler), CA certs (HTTPS), lxml shared libs.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        cron ca-certificates libxml2 libxslt1.1 && \
+    rm -rf /var/lib/apt/lists/*
+
+# Python packages + console scripts from the build stage.
+COPY --from=pybuild /install /usr/local
+
+# Native Claude Code binary + launcher (no Node.js). Expose on PATH.
+COPY --from=claudecli /root/.local /root/.local
+RUN ln -sf /root/.local/bin/claude /usr/local/bin/claude
+
+# App config/assets (paleonews package itself is already installed above).
 COPY sources.txt config.yaml ./
 COPY deploy/entrypoint.sh /app/entrypoint.sh
-
-RUN pip install --no-cache-dir .
 
 # Use /app/data for DB, /app/logs for logs
 RUN mkdir -p /app/data /app/logs && \
