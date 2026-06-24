@@ -77,7 +77,10 @@ paleonews web          # FastAPI 웹 Admin UI 실행
 - 가상환경: `~/venv/paleonews`
 - 테스트: `~/venv/paleonews/bin/python -m pytest tests/ -v`
 - PyInstaller 빌드: `entry.py`를 엔트리포인트로 사용
-- 운영 배포: 단일 Docker 컨테이너 `paleonews`(entrypoint `all` 모드 = cron+bot+web 한 컨테이너), 이미지 태그 = pyproject 버전, `cd /srv/paleonews && ./deploy.sh <버전>`으로 빌드·push 후 배포
+- 운영 배포: 단일 Docker 컨테이너 `paleonews`(entrypoint `all` 모드 = cron+bot+web 한 컨테이너), 이미지 태그 = pyproject 버전
+  - 릴리스: repo 루트에서 `scripts/release.sh [버전]` — 빌드 → push → 배포 산출물(`deploy/docker-compose.yml`, `deploy/deploy.sh`, `scripts/apply_claude_token.sh`)을 `/srv/paleonews`로 복사 → 그곳에서 `deploy.sh` 실행(pull+재생성). 호스트 상태(`.env`/`config.yaml`/`claude`/`data`/`logs`)는 동기화하지 않음
+  - 이미지는 멀티스테이지(`deploy/Dockerfile`): 네이티브 claude 바이너리 사용(Node 불필요), 약 615MB
+  - 구독 토큰 만료 시: 호스트 `claude setup-token` → `/srv/paleonews/apply_claude_token.sh <토큰>`(`.env`의 `CLAUDE_CODE_OAUTH_TOKEN` 갱신 + 컨테이너 재생성)
 
 ## Conventions
 
@@ -95,6 +98,7 @@ paleonews web          # FastAPI 웹 Admin UI 실행
 - Phase 4 완료: 다중 사용자 지원 (users 테이블, 사용자별 키워드 필터, CLI 관리, Telegram 봇 데몬)
 - Phase 5 완료: LLM provider 추상화(anthropic/openai/claude_code), Telegram 챗봇+메모리, FastAPI 웹 Admin UI, 이메일 전송, Docker+nginx 배포
 - 운영 개선 (2026-05): Dockerfile 장애 수정 + config.yaml 호스트 마운트, RSS 소스 DB 이관(feeds 테이블), `app_settings` 기반 설정 overlay + `/settings`에서 provider·모델 편집(드롭다운)
+- 운영 개선 (2026-06, 0.2.8): 구독 OAuth 장기 토큰(`CLAUDE_CODE_OAUTH_TOKEN`) 전환으로 발송 복구, Docker 멀티스테이지+네이티브 claude 바이너리로 이미지 1.13GB→615MB, `scripts/release.sh` 릴리스 자동화 — `devlog/20260624_013_token_renewal_native_claude_slim_image.md`
 - Phase 6 (Django 전환): 계획만 수립됨, 미착수 — `devlog/20260324_P06_django_migration_plan.md`
 
-현재 버전: `0.2.6` (pyproject.toml)
+현재 버전: `0.2.8` (pyproject.toml)

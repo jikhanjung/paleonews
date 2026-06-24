@@ -1,37 +1,19 @@
+# 운영 배포: 단일 컨테이너 "all" 모드 (entrypoint.sh = cron + Telegram bot + web).
+# scripts/release.sh 가 이 파일을 /srv/paleonews 로 복사한 뒤 그곳에서 deploy.sh 를 실행한다.
+# .env / config.yaml / claude / data / logs 는 호스트 고유 상태이며 동기화 대상이 아니다.
 services:
-  # 파이프라인 cron (기본: 매일 08:00 KST = 23:00 UTC)
-  pipeline:
-    image: honestjung/paleonews:latest
-    container_name: paleonews-pipeline
-    command: ["cron"]
-    env_file: ../.env
+  paleonews:
+    image: honestjung/paleonews:${TAG:-latest}
+    container_name: paleonews
+    command: ["all"]
+    env_file: .env
     environment:
       - PIPELINE_CRON=${PIPELINE_CRON:-0 23 * * *}
-    volumes:
-      - /srv/paleonews/data:/app/data
-      - /srv/paleonews/logs:/app/logs
-    restart: unless-stopped
-
-  # Telegram 봇 데몬 (상시 실행)
-  bot:
-    image: honestjung/paleonews:latest
-    container_name: paleonews-bot
-    command: ["bot"]
-    env_file: ../.env
-    volumes:
-      - /srv/paleonews/data:/app/data
-      - /srv/paleonews/logs:/app/logs
-    restart: unless-stopped
-
-  # 웹 관리 UI (상시 실행)
-  web:
-    image: honestjung/paleonews:latest
-    container_name: paleonews-web
-    command: ["web", "--host", "0.0.0.0", "--port", "8000"]
-    env_file: ../.env
     ports:
-      - "${WEB_PORT:-8000}:8000"
+      - "127.0.0.1:8100:8000"
     volumes:
-      - /srv/paleonews/data:/app/data
-      - /srv/paleonews/logs:/app/logs
+      - ${DATA_DIR:-/srv/paleonews/data}:/app/data
+      - ${LOG_DIR:-/srv/paleonews/logs}:/app/logs
+      - ./config.yaml:/app/config.yaml:ro
+      - ./claude:/root/.claude
     restart: unless-stopped

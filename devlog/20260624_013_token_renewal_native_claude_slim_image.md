@@ -68,7 +68,21 @@ cron도 정상 인식.
 **결과: 1.13GB → 615MB (약 46% 감소).** 네이티브 바이너리 224MB가 최대 단일
 구성요소이고 나머지는 python:3.12-slim 베이스 + 파이썬 의존성.
 
-### 3. 버전 bump — `pyproject.toml`
+### 3. 배포 자동화 + repo를 산출물 source of truth로
+
+운영(`/srv/paleonews`)과 repo의 배포 산출물이 드리프트해 있었음 — repo
+`deploy/docker-compose.yml`은 구버전 3-컨테이너, 실제 운영은 단일 `all` 컨테이너;
+`deploy.sh`는 repo에 없고 호스트에만 존재.
+
+- `deploy/docker-compose.yml`을 운영 정본(단일 컨테이너, config/claude 마운트)으로 교체.
+- `deploy/deploy.sh`(호스트 pull+재생성), `scripts/apply_claude_token.sh`(토큰 갱신)를 repo에 포함.
+- `scripts/release.sh` 추가: 빌드 → push → 배포 산출물을 `/srv/paleonews`로 복사 →
+  그곳에서 `deploy.sh` 실행. 호스트 상태(`.env`/`config.yaml`/`claude`/`data`/`logs`)는
+  복사 대상에서 제외. `--no-build`/`--no-deploy` 플래그 지원.
+- `apply_claude_token.sh`의 검증 단계가 `/usr/bin/claude`를 하드코딩하던 것을
+  PATH 검색(`claude`)으로 수정 — 0.2.8 슬림 이미지는 `/usr/local/bin/claude`.
+
+### 4. 버전 bump — `pyproject.toml`
 
 `0.2.7 → 0.2.8`.
 
