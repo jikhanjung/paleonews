@@ -105,6 +105,6 @@ paleonews web          # FastAPI 웹 Admin UI 실행
 - 운영 개선 (2026-05): Dockerfile 장애 수정 + config.yaml 호스트 마운트, RSS 소스 DB 이관(feeds 테이블), `app_settings` 기반 설정 overlay + `/settings`에서 provider·모델 편집(드롭다운)
 - 운영 개선 (2026-06, 0.2.8): 구독 OAuth 장기 토큰(`CLAUDE_CODE_OAUTH_TOKEN`) 전환으로 발송 복구, Docker 멀티스테이지+네이티브 claude 바이너리로 이미지 1.13GB→615MB, `scripts/release.sh` 릴리스 자동화 — `devlog/20260624_013_token_renewal_native_claude_slim_image.md`
 - 배포·데이터 계약 정렬 (2026-07, 0.3.0): fsis2026 동형 full parity — 매니페스트+동사+/healthz+백업+git-free self-heal. 계획 `devlog/20260714_P07_deploy_data_contract_alignment.md`, 구현 `devlog/20260714_014_deploy_data_contract_alignment.md`
-- Phase 6 (Django 전환): 계획만 수립됨, 미착수 — `devlog/20260324_P06_django_migration_plan.md`
+- Phase 6 (Django 전환): 계획 수립됨(`devlog/20260324_P06_django_migration_plan.md`) → **2026-07-14 보류 결정** (0.3.0 배포계약·0.2.8 빌링 이후 실익<손실) — 재평가 `devlog/20260714_015_p06_django_migration_reevaluation.md`
 
 현재 버전: `0.3.1` (pyproject.toml)
