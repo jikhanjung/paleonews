@@ -72,6 +72,15 @@ fsis 의 Django 특정 부분을 적응:
   `/srv/paleonews/{docker-compose.yml,deploy.sh}` 는 신 host 세트로 교체됨.
 - hourly 백업 cron 1회 등록: `0 * * * * python3 /srv/paleonews/scripts/backup_db.py >> /srv/paleonews/logs/backup.log 2>&1`.
 
+## 후속 정리 (028a7c8)
+
+계약 정렬 직후 남아 있던 열린 항목 두 건을 정리:
+- **레거시 `deploy/deploy.sh` 삭제** — 0.3.0 이전 pull-and-restart 스크립트로, 계약 엔진
+  `deploy/host/deploy.sh` 로 대체됨. `sync_to_srv.sh`·Dockerfile 이 모두 `deploy/host/` 를
+  소비하므로 리포 내 참조 없음 확인 후 제거(위 line 72 의 `/srv` 사본 교체와 별개로, 소스 파일 자체 삭제).
+- **운영 DB `users_new` 잔재 테이블 제거** — line 62 에서 관찰만 해둔 `chat_id`→`telegram_chat_id`
+  중단 리빌드의 0-row 잔재를 백업 선행 후 drop. `_migrate()` 의 리빌드 가드가 더는 발동하지 않음(`users` 정상).
+
 ## 버전 이력
 
 | 버전 | 내용 |
