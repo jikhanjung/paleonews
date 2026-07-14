@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="robots" content="noindex">
+<title>PaleoNews 시스템 점검 안내</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "맑은 고딕", "Malgun Gothic", sans-serif;
+    display: flex;
+    min-height: 100vh;
+    margin: 0;
+    align-items: center;
+    justify-content: center;
+    background: #f5f5f7;
+    color: #222;
+  }
+  .box {
+    text-align: center;
+    padding: 2rem 3rem;
+    max-width: 36rem;
+  }
+  h1 {
+    font-size: 1.5rem;
+    margin: 0 0 1.25rem;
+    font-weight: 600;
+  }
+  .reason {
+    color: #555;
+    margin: 0.25rem 0 1.5rem;
+    line-height: 1.7;
+  }
+  .when {
+    font-size: 1.05rem;
+    margin: 0.25rem 0 1rem;
+    color: #222;
+  }
+  .when strong {
+    color: #b54708;
+  }
+  .hint {
+    font-size: 0.875rem;
+    color: #888;
+    margin-top: 1.5rem;
+  }
+</style>
+</head>
+<body>
+  <div class="box">
+    <h1>PaleoNews 시스템 점검 안내</h1>
+    <p class="reason">{{REASON}}</p>
+    <p class="when">예정 복귀 시각: <strong>{{UNTIL_AT}}</strong></p>
+    <p class="hint">이용에 불편을 드려 죄송합니다. 예정 시각이 지나도 페이지가 그대로면 한 번 새로고침해 주세요.</p>
+  </div>
+</body>
+</html>

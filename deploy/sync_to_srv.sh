@@ -32,6 +32,9 @@ cp -p "$HOST_SRC"/_extract_and_deploy.sh  "$HOST_DEST/"
 cp -p "$HOST_SRC"/deploy.sh               "$HOST_DEST/"
 cp -p "$HOST_SRC"/smoke.sh                "$HOST_DEST/"
 cp -p "$HOST_SRC"/rollback.sh             "$HOST_DEST/"
+cp -p "$HOST_SRC"/maintenance.sh          "$HOST_DEST/"
+cp -p "$HOST_SRC"/maintenance.html        "$HOST_DEST/"
+cp -p "$HOST_SRC"/maintenance_planned.html.template "$HOST_DEST/"
 cp -p "$HOST_SRC"/docker-compose.yml      "$HOST_DEST/"
 # apply_claude_token.sh — 구독 토큰 갱신 도구(호스트 상주).
 cp -p "$PROJECT_DIR"/scripts/apply_claude_token.sh "$HOST_DEST/" 2>/dev/null || true
@@ -39,8 +42,8 @@ cp -p "$PROJECT_DIR"/scripts/apply_claude_token.sh "$HOST_DEST/" 2>/dev/null || 
 mkdir -p "$HOST_DEST/scripts"
 cp -p "$PROJECT_DIR"/scripts/backup_db.py "$HOST_DEST/scripts/"
 chmod +x "$HOST_DEST"/deploy-prod.sh "$HOST_DEST"/deploy-dev.sh "$HOST_DEST"/_extract_and_deploy.sh \
-         "$HOST_DEST"/deploy.sh "$HOST_DEST"/smoke.sh "$HOST_DEST"/rollback.sh
-echo "  bootstrap synced (deploy-prod/dev + _extract_and_deploy + deploy/smoke/rollback/compose + backup_db.py)."
+         "$HOST_DEST"/deploy.sh "$HOST_DEST"/smoke.sh "$HOST_DEST"/rollback.sh "$HOST_DEST"/maintenance.sh
+echo "  bootstrap synced (deploy-prod/dev + _extract_and_deploy + deploy/smoke/rollback/maintenance/compose + backup_db.py)."
 echo ""
 echo "다음: hourly 백업 cron 1회 등록 (아직이면):"
 echo "  (crontab -l 2>/dev/null; echo '0 * * * * python3 /srv/paleonews/scripts/backup_db.py >> /srv/paleonews/logs/backup.log 2>&1') | crontab -"

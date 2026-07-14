@@ -42,10 +42,12 @@ safe_extract_sh() {
 }
 
 # 운영 스크립트 — bash -n 검증 후 교체.
-for f in deploy.sh smoke.sh rollback.sh; do safe_extract_sh "$f"; done
-# 비스크립트(구문 검사 대상 아님) — 그대로 추출.
-docker cp "${CID}:/app/deploy/host/docker-compose.yml" "${ROOT}/docker-compose.yml" 2>/dev/null \
-    && echo "  extracted docker-compose.yml" || echo "  (이미지에 docker-compose.yml 없음 — 구버전, 건너뜀)"
+for f in deploy.sh smoke.sh rollback.sh maintenance.sh; do safe_extract_sh "$f"; done
+# 비스크립트(구문 검사 대상 아님) — 그대로 추출. (maintenance_planned.html 은 생성물이라 추출 안 함.)
+for f in docker-compose.yml maintenance.html maintenance_planned.html.template; do
+    docker cp "${CID}:/app/deploy/host/${f}" "${ROOT}/${f}" 2>/dev/null && echo "  extracted ${f}" \
+        || echo "  (이미지에 ${f} 없음 — 구버전, 건너뜀)"
+done
 # backup_db.py — 호스트 cron 이 쓰는 유일한 스크립트(python, bash -n 대상 아님). 그대로 추출.
 mkdir -p "${ROOT}/scripts"
 docker cp "${CID}:/app/scripts/backup_db.py" "${ROOT}/scripts/backup_db.py" 2>/dev/null \
@@ -69,7 +71,7 @@ if docker cp "${CID}:/app/deploy/host/_extract_and_deploy.sh" "${ROOT}/.ead.new"
 fi
 
 docker rm -f "$CID" >/dev/null; trap - EXIT
-chmod +x "${ROOT}/deploy.sh" "${ROOT}/smoke.sh" "${ROOT}/rollback.sh" \
+chmod +x "${ROOT}/deploy.sh" "${ROOT}/smoke.sh" "${ROOT}/rollback.sh" "${ROOT}/maintenance.sh" \
          "${ROOT}/deploy-prod.sh" "${ROOT}/deploy-dev.sh" 2>/dev/null || true
 
 echo ""

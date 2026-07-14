@@ -83,6 +83,7 @@ paleonews web          # FastAPI 웹 Admin UI 실행
   - 릴리스: repo 에서 `deploy/preflight.sh` → `scripts/release.sh [버전]`(= `deploy/build.sh` 빌드·push → 로컬 `/srv/paleonews/deploy-prod.sh`). host 스크립트는 이미지에서 self-heal 추출(`deploy/host/*`, `_extract_and_deploy.sh` — `bash -n`+`.previous`+원자 rename). 최초 1회만 `deploy/sync_to_srv.sh` 부트스트랩
   - deploy 엔진: pull → `.env` TAG → maintenance flag → pre-deploy 스냅샷(정지 후, `-wal`/`-shm`/`.mig` 스키마지문) → `up -d` → `/healthz` 대기 → DB 바인딩 게이트+쓰기 프로브(root) → smoke. 롤백 `/srv/paleonews/rollback.sh <이전> [--db=keep|restore]`(기본 keep=운영 데이터 보존)
   - 이미지는 멀티스테이지(`deploy/Dockerfile`): 네이티브 claude 바이너리(Node 불필요) + gosu(dormant, all 모드는 root 유지). host/*·backup_db.py 내장
+  - **배포 중 점검 페이지**(nginx maintenance flag, fsis 동형): `deploy/nginx/paleonews.conf`(root 로 `/etc/nginx/sites-available/` 설치). deploy.sh 가 `maintenance.flag` 자동 토글(스왑 전 touch, trap EXIT 제거) → nginx 가 503 `maintenance.html` 서빙. 수동/예고: `/srv/paleonews/maintenance.sh {short|planned|off|status}`. flag 는 매 요청 `-f` 평가라 reload 불요
   - DB: `/srv/paleonews/data/`(디렉터리 마운트 → `/app/data`, WAL 형제 동반), `jikhanjung` 소유(컨테이너 root 가 DAC 우회 쓰기). WAL 은 db.py `PRAGMA journal_mode=WAL` 로 이미 활성. `db.py:_migrate()` 가 기동 시 자동(가산 컬럼)
   - 구독 토큰 만료 시: 호스트 `claude setup-token` → `/srv/paleonews/apply_claude_token.sh <토큰>`(`.env`의 `CLAUDE_CODE_OAUTH_TOKEN` 갱신 + 컨테이너 재생성)
 
@@ -106,4 +107,4 @@ paleonews web          # FastAPI 웹 Admin UI 실행
 - 배포·데이터 계약 정렬 (2026-07, 0.3.0): fsis2026 동형 full parity — 매니페스트+동사+/healthz+백업+git-free self-heal. 계획 `devlog/20260714_P07_deploy_data_contract_alignment.md`, 구현 `devlog/20260714_014_deploy_data_contract_alignment.md`
 - Phase 6 (Django 전환): 계획만 수립됨, 미착수 — `devlog/20260324_P06_django_migration_plan.md`
 
-현재 버전: `0.3.0` (pyproject.toml)
+현재 버전: `0.3.1` (pyproject.toml)
