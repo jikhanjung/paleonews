@@ -77,9 +77,13 @@ paleonews web          # FastAPI 웹 Admin UI 실행
 - 가상환경: `~/venv/paleonews`
 - 테스트: `~/venv/paleonews/bin/python -m pytest tests/ -v`
 - PyInstaller 빌드: `entry.py`를 엔트리포인트로 사용
-- 운영 배포: 단일 Docker 컨테이너 `paleonews`(entrypoint `all` 모드 = cron+bot+web 한 컨테이너), 이미지 태그 = pyproject 버전
-  - 릴리스: repo 루트에서 `scripts/release.sh [버전]` — 빌드 → push → 배포 산출물(`deploy/docker-compose.yml`, `deploy/deploy.sh`, `scripts/apply_claude_token.sh`)을 `/srv/paleonews`로 복사 → 그곳에서 `deploy.sh` 실행(pull+재생성). 호스트 상태(`.env`/`config.yaml`/`claude`/`data`/`logs`)는 동기화하지 않음
-  - 이미지는 멀티스테이지(`deploy/Dockerfile`): 네이티브 claude 바이너리 사용(Node 불필요), 약 615MB
+- 운영 배포: 단일 Docker 컨테이너 `paleonews`(entrypoint `all` 모드 = cron+bot+web 한 컨테이너, root 실행), 이미지 태그 = pyproject 버전. **prod = 빌드 호스트(m710q, 로컬 자기호스팅)** — 원격 GCP 아님, 배포는 로컬 실행
+  - **배포·데이터 계약 정렬(0.3.0)**: 매니페스트(`deploy/deploy.toml`) + 동사(`preflight`/`build`/`deploy`/`smoke`/`rollback`) + `/healthz` + 백업 + git-free self-heal. 규약: `../devdocs/wiki/deploy-data-contract.md`, 운영 델타: `DEPLOY.md`
+  - 레인: **`has_seed=false`** — 전 테이블이 운영 데이터(시스템 시드 없음). 불변식 = seed 명령 부재. **안전망 = 백업**(`scripts/backup_db.py` hourly + deploy.sh pre-deploy 스냅샷, retention 20)
+  - 릴리스: repo 에서 `deploy/preflight.sh` → `scripts/release.sh [버전]`(= `deploy/build.sh` 빌드·push → 로컬 `/srv/paleonews/deploy-prod.sh`). host 스크립트는 이미지에서 self-heal 추출(`deploy/host/*`, `_extract_and_deploy.sh` — `bash -n`+`.previous`+원자 rename). 최초 1회만 `deploy/sync_to_srv.sh` 부트스트랩
+  - deploy 엔진: pull → `.env` TAG → maintenance flag → pre-deploy 스냅샷(정지 후, `-wal`/`-shm`/`.mig` 스키마지문) → `up -d` → `/healthz` 대기 → DB 바인딩 게이트+쓰기 프로브(root) → smoke. 롤백 `/srv/paleonews/rollback.sh <이전> [--db=keep|restore]`(기본 keep=운영 데이터 보존)
+  - 이미지는 멀티스테이지(`deploy/Dockerfile`): 네이티브 claude 바이너리(Node 불필요) + gosu(dormant, all 모드는 root 유지). host/*·backup_db.py 내장
+  - DB: `/srv/paleonews/data/`(디렉터리 마운트 → `/app/data`, WAL 형제 동반), `jikhanjung` 소유(컨테이너 root 가 DAC 우회 쓰기). WAL 은 db.py `PRAGMA journal_mode=WAL` 로 이미 활성. `db.py:_migrate()` 가 기동 시 자동(가산 컬럼)
   - 구독 토큰 만료 시: 호스트 `claude setup-token` → `/srv/paleonews/apply_claude_token.sh <토큰>`(`.env`의 `CLAUDE_CODE_OAUTH_TOKEN` 갱신 + 컨테이너 재생성)
 
 ## Conventions
@@ -99,6 +103,7 @@ paleonews web          # FastAPI 웹 Admin UI 실행
 - Phase 5 완료: LLM provider 추상화(anthropic/openai/claude_code), Telegram 챗봇+메모리, FastAPI 웹 Admin UI, 이메일 전송, Docker+nginx 배포
 - 운영 개선 (2026-05): Dockerfile 장애 수정 + config.yaml 호스트 마운트, RSS 소스 DB 이관(feeds 테이블), `app_settings` 기반 설정 overlay + `/settings`에서 provider·모델 편집(드롭다운)
 - 운영 개선 (2026-06, 0.2.8): 구독 OAuth 장기 토큰(`CLAUDE_CODE_OAUTH_TOKEN`) 전환으로 발송 복구, Docker 멀티스테이지+네이티브 claude 바이너리로 이미지 1.13GB→615MB, `scripts/release.sh` 릴리스 자동화 — `devlog/20260624_013_token_renewal_native_claude_slim_image.md`
+- 배포·데이터 계약 정렬 (2026-07, 0.3.0): fsis2026 동형 full parity — 매니페스트+동사+/healthz+백업+git-free self-heal. 계획 `devlog/20260714_P07_deploy_data_contract_alignment.md`, 구현 `devlog/20260714_014_deploy_data_contract_alignment.md`
 - Phase 6 (Django 전환): 계획만 수립됨, 미착수 — `devlog/20260324_P06_django_migration_plan.md`
 
-현재 버전: `0.2.8` (pyproject.toml)
+현재 버전: `0.3.0` (pyproject.toml)

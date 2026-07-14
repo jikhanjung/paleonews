@@ -34,10 +34,11 @@ RUN apt-get update && \
 FROM python:3.12-slim
 WORKDIR /app
 
-# Runtime-only system deps: cron (scheduler), CA certs (HTTPS), lxml shared libs.
+# Runtime-only system deps: cron (scheduler), CA certs (HTTPS), lxml shared libs,
+# gosu (deploy-contract privilege-drop scaffolding — dormant; all-mode runs as root).
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        cron ca-certificates libxml2 libxslt1.1 && \
+        cron ca-certificates libxml2 libxslt1.1 gosu && \
     rm -rf /var/lib/apt/lists/*
 
 # Python packages + console scripts from the build stage.
@@ -50,6 +51,10 @@ RUN ln -sf /root/.local/bin/claude /usr/local/bin/claude
 # App config/assets (paleonews package itself is already installed above).
 COPY sources.txt config.yaml ./
 COPY deploy/entrypoint.sh /app/entrypoint.sh
+# Deploy-contract host artifacts — extracted from the image on each deploy (git-free
+# self-heal): host verb scripts + hourly backup + claude-token helper.
+COPY deploy/host /app/deploy/host
+COPY scripts/backup_db.py scripts/apply_claude_token.sh /app/scripts/
 
 # Use /app/data for DB, /app/logs for logs
 RUN mkdir -p /app/data /app/logs && \

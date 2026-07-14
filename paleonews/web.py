@@ -5,6 +5,7 @@ import logging
 import os
 import threading
 from datetime import date
+from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Form, Query
@@ -72,6 +73,39 @@ def get_available_models() -> list[dict]:
     except Exception as e:
         logger.warning("Failed to fetch model catalogue: %s", e)
         return []
+
+
+def _app_version() -> str:
+    try:
+        return pkg_version("paleonews")
+    except PackageNotFoundError:
+        return "unknown"
+
+
+# --- Health check (deploy contract: smoke 동사가 소비) ---
+
+@app.get("/healthz")
+async def healthz():
+    """배포 계약 헬스 엔드포인트 — 버전 + DB 연결 + 핵심 행 수.
+
+    smoke.sh 가 이 JSON 을 파싱해 status=="ok" && db is true && version 일치 &&
+    counts 존재를 검증한다. DB 연결/조회 실패 시 status="error", db=false, 503."""
+    payload = {"status": "ok", "version": _app_version(), "db": False, "counts": {}}
+    try:
+        db = get_db()
+        counts = {
+            "articles": db.conn.execute("SELECT COUNT(*) FROM articles").fetchone()[0],
+            "feeds": db.conn.execute("SELECT COUNT(*) FROM feeds").fetchone()[0],
+            "users": db.conn.execute("SELECT COUNT(*) FROM users").fetchone()[0],
+        }
+        payload["db"] = True
+        payload["counts"] = counts
+        return JSONResponse(payload)
+    except Exception as e:
+        logger.exception("healthz DB check failed")
+        payload["status"] = "error"
+        payload["error"] = str(e)
+        return JSONResponse(payload, status_code=503)
 
 
 # --- Dashboard ---

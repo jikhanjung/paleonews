@@ -1,0 +1,25 @@
+# 운영 배포: 단일 컨테이너 "all" 모드 (entrypoint.sh = cron + Telegram bot + web).
+# git-free: 이 파일은 이미지 /app/deploy/host/docker-compose.yml 에서 추출돼 /srv/paleonews 에 놓인다.
+# 항상 /srv/paleonews 에서 `docker compose` 를 돌린다(deploy.sh/rollback.sh 가 cd $ROOT).
+# .env / config.yaml / claude / data / logs 는 호스트 고유 상태(이미지에서 동기화하지 않음).
+services:
+  paleonews:
+    image: honestjung/paleonews:${TAG:-latest}
+    container_name: paleonews
+    command: ["all"]
+    env_file: .env
+    environment:
+      - PIPELINE_CRON=${PIPELINE_CRON:-0 23 * * *}
+    ports:
+      - "127.0.0.1:8100:8000"
+    volumes:
+      - /srv/paleonews/data:/app/data        # DB 전용 디렉터리(paleonews.db + -wal/-shm). db_path=data/paleonews.db
+      - /srv/paleonews/logs:/app/logs
+      - /srv/paleonews/config.yaml:/app/config.yaml:ro
+      - /srv/paleonews/claude:/root/.claude   # claude CLI 캐시/설정(구독 인증은 .env 의 CLAUDE_CODE_OAUTH_TOKEN)
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
