@@ -4,38 +4,6 @@
 **아무도 읽지 않는 센티넬은 "검사가 있다는 착각"만 만든다** — healthz 가 읽고 smoke 가
 실패시키는 것까지가 한 세트다. 그 고리를 여기서 고정한다.
 """
-from pathlib import Path
-
-import pytest
-from fastapi.testclient import TestClient
-
-from paleonews import web
-
-
-@pytest.fixture
-def db_dir(tmp_path, monkeypatch):
-    """web.get_db() 가 임시 경로에 DB 를 만들게 한다.
-
-    Database 를 여기서 만들어 주입하면 안 된다 — sqlite3 커넥션은 만든 스레드에서만 쓸 수 있는데
-    TestClient 는 앱을 다른 스레드에서 돌린다. `_db` 를 비워 두고 **요청 스레드가 직접** 열게 한다.
-    """
-    monkeypatch.setattr(web, "_db", None)
-    monkeypatch.setattr(web, "get_config_yaml_only",
-                        lambda: {"db_path": str(tmp_path / "paleonews.db")})
-    yield tmp_path
-    # 닫지 않는다 — 커넥션은 앱 스레드가 열었으므로 여기서 close() 하면 같은 스레드 제약에 걸린다.
-    # monkeypatch 가 `_db` 를 원복하고 tmp_path 는 지워지므로 새는 건 없다.
-
-
-@pytest.fixture
-def client(db_dir):
-    with TestClient(web.app) as c:
-        yield c
-
-
-@pytest.fixture
-def sentinel(db_dir) -> Path:
-    return db_dir / web.INTEGRITY_SENTINEL
 
 
 def test_healthz_ok(client):
