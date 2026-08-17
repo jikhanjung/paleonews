@@ -79,8 +79,10 @@ def cmd_filter(db: Database, config: dict) -> int:
 
 
 def cmd_crawl(db: Database, config: dict) -> int:
-    max_crawl = config.get("crawler", {}).get("max_per_run", 20)
-    crawled = crawl_articles(db, max_crawl=max_crawl)
+    crawler_config = config.get("crawler", {})
+    max_crawl = crawler_config.get("max_per_run", 20)
+    max_attempts = crawler_config.get("max_attempts", 3)
+    crawled = crawl_articles(db, max_crawl=max_crawl, max_attempts=max_attempts)
     print(f"본문 크롤링: {crawled}건")
     return crawled
 
@@ -600,15 +602,15 @@ def _run_pipeline(db: Database, config: dict):
         errors.append(f"요약 실패: {e}")
 
     print("\n=== 5/5 전송 ===")
+    sent_before = db.get_stats()["sent"]
     try:
         cmd_send(db, config)
     except Exception as e:
         logger.exception("Send failed")
         errors.append(f"전송 실패: {e}")
 
-    # Record sent count from dispatches
-    stats = db.get_stats()
-    run_data["sent"] = stats["sent"]
+    # Record what this run sent, not the all-time dispatch total
+    run_data["sent"] = db.get_stats()["sent"] - sent_before
 
     print("\n=== 완료 ===")
     cmd_status(db)

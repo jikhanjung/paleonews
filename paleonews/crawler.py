@@ -36,22 +36,24 @@ def crawl_article(url: str) -> str | None:
 
         content_type = response.headers.get("content-type", "")
         if "html" not in content_type:
+            logger.warning("Skipping %s: content-type %s", url, content_type)
             return None
 
         text = extract_text(response.text)
         if len(text) < 100:
+            logger.warning("Skipping %s: extracted only %d chars", url, len(text))
             return None
 
         return text
-    except Exception:
-        logger.debug("Failed to crawl %s", url)
+    except Exception as e:
+        logger.warning("Failed to crawl %s: %s", url, e)
         return None
 
 
-def crawl_articles(db, max_crawl: int = 20) -> int:
+def crawl_articles(db, max_crawl: int = 20, max_attempts: int = 3) -> int:
     """Crawl body text for relevant articles that haven't been crawled yet.
     Returns count of successfully crawled articles."""
-    uncrawled = db.get_uncrawled()
+    uncrawled = db.get_uncrawled(max_attempts=max_attempts)
     targets = uncrawled[:max_crawl]
     crawled = 0
 
@@ -61,9 +63,15 @@ def crawl_articles(db, max_crawl: int = 20) -> int:
         if body:
             db.save_body(article["id"], body)
             crawled += 1
+        else:
+            # Count the failure so a permanently dead URL retires from the queue
+            db.record_crawl_failure(article["id"])
 
         if i < len(targets) - 1:
             time.sleep(REQUEST_DELAY)
 
-    logger.info("Crawled %d/%d articles", crawled, len(targets))
+    if targets and crawled == 0:
+        logger.error("Crawled 0/%d articles — every fetch failed", len(targets))
+    else:
+        logger.info("Crawled %d/%d articles", crawled, len(targets))
     return crawled

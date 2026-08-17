@@ -26,7 +26,8 @@ class Database:
                 is_relevant BOOLEAN,
                 summary_ko  TEXT,
                 title_ko    TEXT,
-                body        TEXT
+                body        TEXT,
+                crawl_attempts INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS dispatches (
@@ -98,6 +99,13 @@ class Database:
         article_cols = [row[1] for row in self.conn.execute("PRAGMA table_info(articles)")]
         if "body" not in article_cols:
             self.conn.execute("ALTER TABLE articles ADD COLUMN body TEXT")
+            self.conn.commit()
+
+        # Migrate: add crawl_attempts column if missing
+        if "crawl_attempts" not in article_cols:
+            self.conn.execute(
+                "ALTER TABLE articles ADD COLUMN crawl_attempts INTEGER NOT NULL DEFAULT 0"
+            )
             self.conn.commit()
 
         # Migrate: add user_id column to dispatches if missing
@@ -459,11 +467,29 @@ class Database:
         )
         self.conn.commit()
 
-    def get_uncrawled(self) -> list[dict]:
+    def get_uncrawled(self, max_attempts: int = 3) -> list[dict]:
+        """Articles still needing a body, newest first.
+
+        Only unsummarized articles qualify (body is used solely by the summarizer),
+        and URLs that already failed `max_attempts` times drop out — otherwise a
+        block of permanently unfetchable URLs at the head of the queue starves
+        every newer article.
+        """
         rows = self.conn.execute(
-            "SELECT * FROM articles WHERE is_relevant = 1 AND body IS NULL"
+            """SELECT * FROM articles
+               WHERE is_relevant = 1 AND body IS NULL AND summary_ko IS NULL
+                 AND crawl_attempts < ?
+               ORDER BY id DESC""",
+            (max_attempts,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def record_crawl_failure(self, article_id: int):
+        self.conn.execute(
+            "UPDATE articles SET crawl_attempts = crawl_attempts + 1 WHERE id = ?",
+            (article_id,),
+        )
+        self.conn.commit()
 
     def save_body(self, article_id: int, body: str):
         self.conn.execute(

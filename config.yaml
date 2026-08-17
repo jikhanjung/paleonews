@@ -63,6 +63,7 @@ filter:
 
 crawler:
   max_per_run: 20
+  max_attempts: 3   # 연속 실패 시 큐에서 은퇴 (죽은 URL 이 신규 기사 막지 않도록)
 
 summarizer:
   model: "claude-sonnet-4-6"
