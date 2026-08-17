@@ -31,6 +31,14 @@ dev = [
 [tool.setuptools.packages.find]
 include = ["paleonews*"]
 
+# Jinja2 템플릿은 .py 가 아니라서 명시하지 않으면 wheel 에 들어가지 않는다.
+# web.py 는 Path(__file__).parent / "templates" 를 보므로 **설치된 패키지 안에**
+# 있어야 한다. 빠지면 임포트는 멀쩡히 되고 요청 시점에야 TemplateNotFound 로 터져서,
+# /healthz 는 200 인데 페이지만 500 이 되는 형태로 숨는다 — 실제로 대시보드·기사·
+# 사용자·상세·설정 5개 페이지가 그 상태였다.
+[tool.setuptools.package-data]
+paleonews = ["templates/*.html"]
+
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
