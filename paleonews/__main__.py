@@ -9,6 +9,7 @@ from datetime import date
 from pathlib import Path
 
 from .config import load_config, apply_settings_overlay
+from .log_redact import RedactingFilter
 from .llm import create_llm_client
 from .db import Database
 from .fetcher import fetch_all
@@ -36,9 +37,14 @@ def setup_logging(config: dict):
     root = logging.getLogger()
     root.setLevel(level)
 
+    # 자격증명 마스킹. 핸들러에 붙여야 로거 이름과 무관하게(httpx 등 서드파티 포함)
+    # 콘솔·파일로 나가는 모든 레코드에 적용된다.
+    redactor = RedactingFilter()
+
     # Console handler
     console = logging.StreamHandler()
     console.setFormatter(fmt)
+    console.addFilter(redactor)
     root.addHandler(console)
 
     # File handler (with rotation)
@@ -52,6 +58,7 @@ def setup_logging(config: dict):
             log_file, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8",
         )
         file_handler.setFormatter(fmt)
+        file_handler.addFilter(redactor)
         root.addHandler(file_handler)
 
 
