@@ -34,6 +34,15 @@ except Exception as e:
     sys.exit(1)
 
 errs = []
+if d.get("status") == "degraded":
+    # hourly backup_db.py 의 PRAGMA integrity_check 실패 → DB 옆 센티넬. **배포 문제가 아니다.**
+    print("FAIL: status=degraded — **운영 DB 손상 감지**(배포 자체 문제 아님, 롤백은 답이 아닐 수 있음)")
+    print(f"  {d.get('integrity')}")
+    print("  · 백업 로테이션 prune 은 이미 중단됨 — /srv/paleonews/backup/ 의 과거 스냅샷이 복구 후보")
+    print("  · 증거 사본: /srv/paleonews/backup/paleonews_INTEGRITY_FAIL.corrupt")
+    print("  · 확인: sqlite3 /srv/paleonews/data/paleonews.db 'PRAGMA integrity_check'")
+    print("  · 복구 후 다음 정시 검사가 통과하면 센티넬 자동 해제(급하면 rm /srv/paleonews/data/INTEGRITY_FAIL)")
+    sys.exit(1)
 if d.get("status") != "ok":
     errs.append(f"status={d.get('status')!r} (기대 'ok', error={d.get('error')!r})")
 if d.get("db") is not True:

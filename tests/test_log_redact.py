@@ -56,11 +56,17 @@ def _capture(logger_name, msg, *args):
     handler.addFilter(RedactingFilter())
     root = logging.getLogger()
     saved, saved_level = root.handlers, root.level
-    root.handlers, root.level = [handler], logging.INFO
+    root.handlers = [handler]
+    # ⚠️ `root.level = ...` 직접 대입은 안 된다 — 파이썬 logging 은 로거별로 "이 레벨이 켜졌나"를
+    # 캐시하고(Logger._cache), 그 캐시는 **setLevel() 이 호출하는 manager._clear_cache() 로만** 지워진다.
+    # 직접 대입하면 캐시가 남아, 앞선 테스트에서 이미 한 번 로깅된 적 있는 로거(예: TestClient 가
+    # 내부적으로 httpx 를 쓰면서 캐시를 채운 경우)는 INFO 가 꺼진 것으로 판정돼 레코드가 통째로 버려진다.
+    root.setLevel(logging.INFO)
     try:
         logging.getLogger(logger_name).info(msg, *args)
     finally:
-        root.handlers, root.level = saved, saved_level
+        root.handlers = saved
+        root.setLevel(saved_level)
     return buf.getvalue()
 
 

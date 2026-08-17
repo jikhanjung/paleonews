@@ -84,12 +84,29 @@ def _app_version() -> str:
 
 # --- Health check (deploy contract: smoke 동사가 소비) ---
 
+INTEGRITY_SENTINEL = "INTEGRITY_FAIL"
+
+
+def _integrity_sentinel(db_path: str) -> str | None:
+    """scripts/backup_db.py 가 DB 옆에 남긴 손상 플래그의 첫 줄(없으면 None).
+
+    센티넬을 아무도 읽지 않으면 "검사가 있다는 착각"만 만든다(계약 §규범요약 SHOULD) —
+    healthz 가 읽고 smoke 가 실패시키는 것까지가 한 세트다.
+    """
+    try:
+        return (Path(db_path).parent / INTEGRITY_SENTINEL).read_text().splitlines()[0]
+    except (OSError, IndexError):
+        return None
+
 @app.get("/healthz")
 async def healthz():
     """배포 계약 헬스 엔드포인트 — 버전 + DB 연결 + 핵심 행 수.
 
     smoke.sh 가 이 JSON 을 파싱해 status=="ok" && db is true && version 일치 &&
-    counts 존재를 검증한다. DB 연결/조회 실패 시 status="error", db=false, 503."""
+    counts 존재를 검증한다. DB 연결/조회 실패 시 status="error", db=false, 503.
+
+    backup_db.py 가 무결성 실패로 남긴 센티넬이 있으면 status="degraded" (HTTP 는 200 유지 —
+    서비스는 살아 있고 배포도 성공한 것이다. 다만 smoke 가 실패해 사람이 보게 된다)."""
     payload = {"status": "ok", "version": _app_version(), "db": False, "counts": {}}
     try:
         db = get_db()
@@ -100,6 +117,10 @@ async def healthz():
         }
         payload["db"] = True
         payload["counts"] = counts
+        # error 가 우선 — 연결조차 안 되면 손상 여부는 부차적. 건전할 때만 센티넬을 본다.
+        if sentinel := _integrity_sentinel(db.db_path):
+            payload["status"] = "degraded"
+            payload["integrity"] = sentinel
         return JSONResponse(payload)
     except Exception as e:
         logger.exception("healthz DB check failed")
