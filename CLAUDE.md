@@ -107,6 +107,8 @@ paleonews web          # FastAPI 웹 Admin UI 실행
 - 배포·데이터 계약 정렬 (2026-07, 0.3.0): fsis2026 동형 full parity — 매니페스트+동사+/healthz+백업+git-free self-heal. 계획 `devlog/20260714_P07_deploy_data_contract_alignment.md`, 구현 `devlog/20260714_014_deploy_data_contract_alignment.md`
 - Phase 6 (Django 전환): 계획 수립됨(`devlog/20260324_P06_django_migration_plan.md`) → **2026-07-14 보류 결정** (0.3.0 배포계약·0.2.8 빌링 이후 실익<손실) — 재평가 `devlog/20260714_015_p06_django_migration_reevaluation.md`
 
+- **Django 전환 (2026-08-17, 0.3.7~0.3.8)**: FastAPI → Django 5.2 + gunicorn(P08 §P2). `config/`(settings·urls) + `news/`(models·views·admin·management). 템플릿은 Jinja2 백엔드로 **그대로 재사용**. admin 도입(로그인은 `/admin/` 만 — 기존 5화면은 열린 채 유지). cron 은 `manage.py run_pipeline`, 봇은 `manage.py bot`. **단일 컨테이너 all 모드·구독 과금 표면 무변경.** `devlog/20260817_018_p2_django_port.md`
+- 운영 수정 (2026-08-17, 0.3.2~0.3.6): 로그 마스킹, 템플릿 wheel 누락, 크롤 큐 기아, 백업 검증·반출 위생, `_migrate()` 레거시 경로 복구
 - 운영 수정 (2026-08-17, 0.3.2~0.3.4): 로그 자격증명 마스킹(0.3.2), 템플릿이 wheel 에서 누락돼 5개 페이지 500 이던 것 복구(0.3.3), **크롤 큐 기아 복구**(0.3.4) — 죽은 URL 48건이 큐 앞을 막아 2026-02-18 이후 본문 크롤 0건이었음, `devlog/20260817_016_crawler_queue_starvation_fix.md`
 
-현재 버전: `0.3.4` (pyproject.toml)
+현재 버전: `0.3.8` (pyproject.toml)
