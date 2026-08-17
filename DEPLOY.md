@@ -36,6 +36,7 @@
 
 | 버전 | 운영 델타 (배포 시 확인) |
 |------|--------------------------|
+| 0.3.2 | **로그 자격증명 마스킹.** httpx 가 요청 URL 을 INFO 로 찍는데 Telegram 은 토큰을 URL **경로**에 담아, 봇 폴링마다(10초 주기) 토큰이 평문으로 기록되고 있었다 — 2026-08-17 실측 `/srv/paleonews/logs` 4개 파일에 **104,075건**, 퍼미션 0664(세계 읽기). `log_redact.RedactingFilter` 를 **핸들러**에 부착해 서드파티 로거(httpx)까지 덮는다. 기존 로그는 삭제·truncate 로 0건 처리 완료, 파일 퍼미션 0640 으로 축소. 소급 정리가 또 필요하면 `sudo scripts/redact_existing_logs.sh`. **배포 후 확인**: 컨테이너 로그의 telegram 요청이 `bot<id>:<redacted>` 로 나오는지. **토큰 재발급은 하지 않기로 결정**(2026-08-17) — 파일을 지워도 과거 노출은 되돌려지지 않으므로 추후 재검토 대상으로 남긴다. |
 | 0.3.1 | **배포 중 점검 페이지**(nginx maintenance flag, fsis 동형). `deploy/nginx/paleonews.conf` 를 `/etc/nginx/sites-available/` 에 설치 필요(root, 1회): `sudo cp deploy/nginx/paleonews.conf /etc/nginx/sites-available/paleonews.conf && sudo nginx -t && sudo systemctl reload nginx`. deploy.sh 가 maintenance.flag 자동 토글. 수동: `/srv/paleonews/maintenance.sh {short\|planned\|off\|status}`. |
 | 0.3.0 | 배포·데이터 계약 정렬(full parity). **매니페스트+동사+/healthz+백업+self-heal 신설.** 최초 배포는 `sync_to_srv.sh` 1회 부트스트랩 후 self-heal 전환 + hourly `backup_db.py` cron 등록. 컨테이너 여전히 root(cron·`/root/.claude` 요구) — gosu 는 dormant. |
 | 0.2.8 | 구독 인증 = `.env` 의 `CLAUDE_CODE_OAUTH_TOKEN`(장기 토큰). **만료 시 `/srv/paleonews/apply_claude_token.sh <토큰>`** (`claude setup-token` → env 갱신 + 컨테이너 재생성). `ANTHROPIC_API_KEY` 는 크레딧 폴백이라 주석 처리 유지. |
