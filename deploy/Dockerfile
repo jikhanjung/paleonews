@@ -50,6 +50,11 @@ RUN ln -sf /root/.local/bin/claude /usr/local/bin/claude
 
 # App config/assets (paleonews package itself is already installed above).
 COPY sources.txt config.yaml ./
+# Django 층(P08 §P2) — 휠에는 안 들어간다(`packages.find` 가 `paleonews*` 만 잡는다).
+# 소스 그대로 실어 gunicorn/manage.py 가 /app 에서 실행되게 한다.
+COPY manage.py ./
+COPY config/ config/
+COPY news/ news/
 COPY deploy/entrypoint.sh /app/entrypoint.sh
 # Deploy-contract host artifacts — extracted from the image on each deploy (git-free
 # self-heal): host verb scripts + hourly backup + claude-token helper.

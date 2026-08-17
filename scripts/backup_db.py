@@ -97,6 +97,42 @@ def clear_sentinel(db_dir: Path):
             log(f"경고: 센티넬 해제 실패 ({sentinel}: {e})")
 
 
+def sanitize_egress(conn: sqlite3.Connection) -> int:
+    """스냅샷 **사본**에서 bearer 토큰(`django_session`)을 지운다. 반환: 지운 행 수.
+
+    ★ **대상은 스냅샷 사본뿐 — 라이브 운영 DB 는 읽기만 한다.** 로그인한 사용자는 무영향.
+
+    왜 (계약 §백업 레인 MUST, cdGTS 151 · fcmanager 0.6.25 · fsis2026 0.5.87 동형):
+      `django_session.session_key` 는 **쿠키에 담기는 값 그 자체(bearer 토큰)** 다. 사본을 읽은
+      사람이 그걸 **운영에** 되제시하면 운영이 자기 DB 에서 그 행을 찾아 자기 SECRET_KEY 로
+      디코드해 **그 사용자로 로그인된다**. ⚠️ **SECRET_KEY 가 달라도 안 막힌다** — 그 공격은
+      해독을 하지 않는다("prod/test 키가 다르니 안전"은 틀렸다). 받는 쪽에선 키 불일치로
+      무용지물이라, **주는 쪽엔 위험하고 받는 쪽엔 쓸모없는 순수 손해** = 지워서 잃는 게 없다.
+
+    비밀번호 해시(`auth_user.password`)는 **남긴다** — 성질이 다르다(강한 KDF 라 그냥 쓸 수 없고,
+    지우면 사본으로 로그인 확인을 못 한다).
+
+    **초크포인트를 여기(hourly)에 두는 이유**: 하위 트랙(오프사이트·미러·수동 scp)은 전부 이
+    산출물을 소비하므로 한 번 지우면 **구조적으로** 덮인다. 반대로 반출 스크립트마다 지우면
+    트랙이 늘 때 빠뜨린다. 롤백용 pre_deploy 스냅샷은 **호스트를 안 떠나므로** 위생 대상이
+    아니다(deploy.sh 가 만들고 이 스크립트는 prune 만 한다) → `rollback --db=restore` 는 무영향.
+
+    ⚠️ paleonews 는 0.3.6 까지 세션 테이블 자체가 없었다(FastAPI). Django admin 도입(P08 §P2)으로
+    생기며, 테이블이 없으면 조용히 0 을 돌려준다.
+
+    **VACUUM 은 무조건 한다.** DELETE 는 행만 지우고, 과거에 지워진 세션(로그아웃·만료 정리)의
+    잔류는 free page 에 남아 `backup()` 이 페이지째 복사해 간다. 남고 안 남고가 sqlite 빌드
+    설정(`secure_delete`)에 갈리는데 그건 통제 밖이라 조건을 따지지 않는다 — 비용은 1초 미만이다.
+    """
+    has_table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='django_session'"
+    ).fetchone()
+    n = conn.execute("DELETE FROM django_session").rowcount if has_table else 0
+    conn.commit()                       # VACUUM 은 트랜잭션 안에서 못 돈다 → 먼저 닫는다
+    conn.execute("VACUUM")
+    return n
+
+
 def backup_one(name: str, src: Path) -> Path | None:
     if not src.exists():
         log(f"{name}: source not found ({src}) — skip")
@@ -110,20 +146,25 @@ def backup_one(name: str, src: Path) -> Path | None:
         # (파이썬 sqlite3 의 고전적 함정). 단명 cron 프로세스라 GC 가 닫아주긴 했지만,
         # GC 타이밍에 기대는 정합성은 계약이 아니고 아래 integrity_check 가 정적인 파일을 봐야 한다.
         source_conn = dest_conn = None
+        purged, sanitize_err = 0, None
         try:
             source_conn = sqlite3.connect(str(src))
             dest_conn = sqlite3.connect(str(tmp))
             source_conn.backup(dest_conn)       # online backup API — writer 상주해도 일관 스냅샷
             try:
+                # 반출 위생 — **채택 전에** 지운다(위 sanitize_egress docstring 참조).
+                purged = sanitize_egress(dest_conn)
                 # backup 은 소스의 저널 모드까지 복사 → 스냅샷이 WAL 로 뜬다(운영 소스가 WAL).
                 # **아카이브는 WAL 일 이유가 없다**(동시 writer 가 없다). DELETE 로 내려
                 # -wal/-shm 이 아예 존재하지 않게 만든다 — 특히 아래 integrity_check 는 mode=ro 로 여는데,
                 # **읽기 전용 커넥션은 WAL DB 의 -shm 을 만들어놓고 치울 권한이 없어** 매시 고아 2개가 쌓인다.
                 dest_conn.execute("PRAGMA journal_mode=DELETE")
             except sqlite3.DatabaseError as e:
-                # ⚠️ 손상된 소스면 여기서 터진다. 예외를 밖으로 던지면 아래 무결성 게이트를 건너뛰어
-                # **센티넬도 증거 사본도 안 남는다**(= smoke 가 못 잡음). 삼키고 게이트가 판정하게 넘긴다.
-                log(f"{name}: journal_mode 전환 실패({e}) — 무결성 게이트에 판정을 넘긴다")
+                # ⚠️ 손상된 소스면 여기서 터진다(VACUUM 이 malformed 로 죽는다). 예외를 밖으로
+                # 던지면 아래 무결성 게이트를 건너뛰어 **센티넬도 증거 사본도 안 남는다**
+                # (= smoke 가 못 잡음). 삼키고 게이트가 판정하게 넘긴다.
+                sanitize_err = e
+                log(f"{name}: 위생/journal_mode 단계 실패({e}) — 무결성 게이트에 판정을 넘긴다")
         finally:
             for conn in (dest_conn, source_conn):
                 if conn is not None:
@@ -147,10 +188,18 @@ def backup_one(name: str, src: Path) -> Path | None:
             raise_sentinel(src.parent, problems)
             return None
 
+        if sanitize_err is not None:
+            # 무결성은 통과했는데 위생만 실패 = 손상이 아닌 다른 문제(권한 등). 센티넬은 올리지
+            # 않는다(DB 손상 신호가 아니다). 다만 **세션이 실린 스냅샷을 채택하느니 백업을 거른다** —
+            # 이 사본은 언젠가 호스트를 떠난다(계약: 위생 실패 시 반출 중단).
+            log(f"{name}: !! 반출 위생 실패 — 스냅샷 미채택({sanitize_err})")
+            tmp.unlink(missing_ok=True)
+            return None
+
         tmp.replace(dest)  # 원자 rename(같은 fs)
         clear_sentinel(src.parent)
         size_mb = dest.stat().st_size / (1024 * 1024)
-        log(f"{name}: backup OK ({dest.name}, {size_mb:.1f} MB, integrity ok)")
+        log(f"{name}: backup OK ({dest.name}, {size_mb:.1f} MB, integrity ok, session {purged}행 제거)")
         return dest
     except Exception as e:
         log(f"{name}: ERROR {e}")

@@ -42,6 +42,10 @@ def post(client, path, **form):
     return client.post(path, data=form, follow_redirects=False)
 
 
+def location(resp) -> str:
+    return resp.headers["location"]
+
+
 # --- 화면 -----------------------------------------------------------------
 
 @pytest.mark.parametrize("path", ["/", "/articles", "/users", "/settings"])
@@ -71,7 +75,7 @@ def test_user_detail_renders(client, seeded):
 def test_user_detail_unknown_redirects(client, seeded):
     resp = client.get("/users/99999", follow_redirects=False)
     assert resp.status_code == 303
-    assert resp.headers["location"] == "/users"
+    assert location(resp) == "/users"
 
 
 def test_settings_page_shows_feeds(client, seeded):
@@ -85,7 +89,7 @@ def test_add_user(client, seeded, db):
     before = len(db.get_all_users())
     resp = post(client, "/users/add", telegram_chat_id="300", name="새사람",
                 email="new@example.com")
-    assert resp.status_code == 303 and resp.headers["location"] == "/users"
+    assert resp.status_code == 303 and location(resp) == "/users"
 
     users = db.get_all_users()
     assert len(users) == before + 1
@@ -158,7 +162,7 @@ def test_user_edit_updates_fields_and_keywords(client, seeded, db):
                 telegram_chat_id=" 999 ", username=" 바뀐이름 ", display_name="표시",
                 email=" x@example.com ", keywords="암모나이트",
                 is_active="true", is_admin="", notify_telegram="true", notify_email="")
-    assert resp.status_code == 303 and resp.headers["location"] == f"/users/{uid}"
+    assert resp.status_code == 303 and location(resp) == f"/users/{uid}"
 
     u = db.get_user(uid)
     assert u["telegram_chat_id"] == "999"      # 앞뒤 공백 제거
@@ -178,7 +182,7 @@ def test_settings_models_update_writes_overlay(client, seeded, db):
     resp = post(client, "/settings/models/update",
                 llm_provider=" claude_code ", filter_model=" haiku-x ",
                 summarizer_model="sonnet-y", chat_model="sonnet-z")
-    assert resp.status_code == 303 and resp.headers["location"] == "/settings"
+    assert resp.status_code == 303 and location(resp) == "/settings"
 
     s = db.get_all_settings()
     assert s["llm.provider"] == "claude_code"          # 공백 제거
@@ -234,7 +238,7 @@ def test_pipeline_run_spawns_and_reports(client, seeded, monkeypatch):
     monkeypatch.setattr(main_mod, "_run_pipeline", lambda db, config: calls.append(True))
 
     resp = post(client, "/pipeline/run")
-    assert resp.status_code == 303 and resp.headers["location"] == "/"
+    assert resp.status_code == 303 and location(resp) == "/"
 
     import time
     for _ in range(50):
@@ -246,10 +250,9 @@ def test_pipeline_run_spawns_and_reports(client, seeded, monkeypatch):
     assert status == {"running": False, "last_result": "success"}
 
 
-def test_pipeline_run_rejects_concurrent(client, seeded, monkeypatch):
+def test_pipeline_run_rejects_concurrent(client, seeded, pipeline_state, monkeypatch):
     """이미 돌고 있으면 409 — 두 번 눌러 파이프라인이 겹치면 LLM 비용이 두 배가 된다."""
-    monkeypatch.setitem(__import__("paleonews.web", fromlist=["_pipeline_status"])._pipeline_status,
-                        "running", True)
+    monkeypatch.setitem(pipeline_state, "running", True)
     resp = post(client, "/pipeline/run")
     assert resp.status_code == 409
     assert resp.json() == {"status": "already_running"}

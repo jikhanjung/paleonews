@@ -22,6 +22,15 @@ if [ -n "$TARGET_UID" ] && [ "$TARGET_UID" != "0" ]; then
     echo "entrypoint: /app/data uid=$TARGET_UID 소유 — 컨테이너는 root 로 실행(root 는 소유권 무관 쓰기 가능). 조치 불요."
 fi
 
+export DJANGO_SETTINGS_MODULE=config.settings
+
+# 스키마 마이그레이션 — 기동 시 멱등 적용. 최초 전환(0.3.7)은 **--fake-initial**:
+# 기존 테이블(articles 2,948 / dispatches 784) 위에 CREATE TABLE 이 돌면 안 된다.
+# auth·sessions·admin 테이블은 **실제로 생성된다**(admin 도입의 대가).
+run_migrations() {
+    (cd /app && python manage.py migrate --fake-initial --noinput)
+}
+
 MODE="${1:-all}"
 shift 2>/dev/null || true
 
@@ -33,31 +42,40 @@ case "$MODE" in
     SCHEDULE="${PIPELINE_CRON:-0 23 * * *}"
     export -p | grep -Ev '(BASHOPTS|BASH_VERSINFO|EUID|PPID|SHELLOPTS|UID|_=)' > /app/env.sh
     echo "SHELL=/bin/bash" > /etc/cron.d/paleonews
-    echo "$SCHEDULE root /bin/bash -c 'cd /app && source /app/env.sh && python -m paleonews run >> /proc/1/fd/1 2>&1'" >> /etc/cron.d/paleonews
+    echo "$SCHEDULE root /bin/bash -c 'cd /app && source /app/env.sh && python manage.py run_pipeline >> /proc/1/fd/1 2>&1'" >> /etc/cron.d/paleonews
     echo "" >> /etc/cron.d/paleonews
     chmod 0644 /etc/cron.d/paleonews
     crontab /etc/cron.d/paleonews
     cron
     echo "cron 시작: $SCHEDULE"
 
+    run_migrations
+
     # 2) Telegram bot 백그라운드 실행
     if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
-      python -m paleonews bot &
+      (cd /app && python manage.py bot) &
       echo "Telegram bot 시작"
     fi
 
-    # 3) Web UI 포그라운드 실행
-    echo "Web UI 시작"
-    exec python -m paleonews web --host 0.0.0.0 --port "${WEB_PORT_INTERNAL:-8000}"
+    # 3) Web UI 포그라운드 실행 — Django + gunicorn.
+    # **worker 1개**로 고정한다(fsis 는 2개). 파이프라인 실행 상태(`_pipeline_status`)가
+    # 프로세스 로컬이라 worker 가 둘이면 "실행 중" 표시와 409 중복 방지가 worker 마다 갈린다.
+    # SQLite 쓰기 주체를 늘리지 않는 이유도 같다(계약 §SHOULD). 동시성은 스레드로 얻는다.
+    echo "Web UI 시작 (Django + gunicorn)"
+    cd /app
+    exec gunicorn --bind "0.0.0.0:${WEB_PORT_INTERNAL:-8000}" \
+        --workers "${GUNICORN_WORKERS:-1}" --threads "${GUNICORN_THREADS:-4}" \
+        --access-logfile - config.wsgi:application
     ;;
   cron)
     SCHEDULE="${PIPELINE_CRON:-0 23 * * *}"
     export -p | grep -Ev '(BASHOPTS|BASH_VERSINFO|EUID|PPID|SHELLOPTS|UID|_=)' > /app/env.sh
     echo "SHELL=/bin/bash" > /etc/cron.d/paleonews
-    echo "$SCHEDULE root /bin/bash -c 'cd /app && source /app/env.sh && python -m paleonews run >> /proc/1/fd/1 2>&1'" >> /etc/cron.d/paleonews
+    echo "$SCHEDULE root /bin/bash -c 'cd /app && source /app/env.sh && python manage.py run_pipeline >> /proc/1/fd/1 2>&1'" >> /etc/cron.d/paleonews
     echo "" >> /etc/cron.d/paleonews
     chmod 0644 /etc/cron.d/paleonews
     crontab /etc/cron.d/paleonews
+    run_migrations
     echo "Pipeline cron started: $SCHEDULE"
     exec cron -f
     ;;

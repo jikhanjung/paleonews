@@ -16,6 +16,7 @@ cron 파이프라인 + Telegram bot + web 이 한 컨테이너에서 root 로 �
 import os
 from pathlib import Path
 
+import paleonews
 from paleonews.config import load_config
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -47,9 +48,22 @@ ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"
 
 TEMPLATES = [
+    # 기존 화면 5개는 **Jinja2 템플릿 그대로 쓴다.** Django 템플릿 언어로 다시 쓰지 않는 이유:
+    # `|map(...)` 처럼 인자를 받는 필터는 Django 템플릿에 없어서 전부 손봐야 하고, 그 과정이
+    # 곧 "화면이 조용히 달라지는" 경로다. Django 는 Jinja2 백엔드를 기본 제공한다.
+    {
+        "BACKEND": "django.template.backends.jinja2.Jinja2",
+        # ⚠️ **설치된 패키지 안**을 가리켜야 한다. 컨테이너는 `pip install` 로 paleonews 를
+        # site-packages 에 넣으므로 `BASE_DIR / "paleonews"` 는 존재하지 않는다 — repo 에서
+        # 테스트할 땐 멀쩡하고 이미지에서만 전 화면이 500 이 된다(0.3.3 이 정확히 그 모양이었다).
+        "DIRS": [Path(paleonews.__file__).resolve().parent / "templates"],
+        "APP_DIRS": False,
+        "OPTIONS": {"environment": "config.jinja2.environment"},
+    },
+    # admin 은 Django 템플릿 언어를 요구한다 — 두 엔진은 공존한다(Django 가 순서대로 찾는다).
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [BASE_DIR / "paleonews" / "templates"],
+        "DIRS": [],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
