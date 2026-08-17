@@ -120,12 +120,34 @@ class Database:
             self.conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
             self.conn.commit()
 
-        # Migrate: rename chat_id → telegram_chat_id and make nullable
+        # Migrate: rename chat_id → telegram_chat_id and make it nullable
         if "chat_id" in user_cols and "telegram_chat_id" not in user_cols:
             self.conn.execute("ALTER TABLE users RENAME COLUMN chat_id TO telegram_chat_id")
             self.conn.commit()
-            # Recreate table to remove NOT NULL constraint
+
+        # Rebuild to drop the NOT NULL on telegram_chat_id (이메일 전용 사용자를 위해).
+        #
+        # 조건을 "방금 rename 했는가"가 아니라 **"아직 NOT NULL 인가"** 로 잡는다. 위 rename 은
+        # 자체 커밋이라, 예전엔 rename 만 성공하고 재구축이 실패하면 다음 실행에서 `chat_id` 가
+        # 이미 없어 분기를 통째로 건너뛰고 **NOT NULL 인 채로 영영 굳었다**(실측: repo 개발 DB).
+        notnull = {row[1]: row[3] for row in self.conn.execute("PRAGMA table_info(users)")}
+        if notnull.get("telegram_chat_id"):
+            # ⚠️ `SELECT *` 를 쓰면 안 된다 — `email` 은 위 마이그레이션이 **맨 뒤에** 붙이는데
+            # users_new 는 5번째로 선언한다. 순서가 어긋나 `keywords`(NULL)가 `is_admin`(NOT NULL)
+            # 자리로 들어가 `NOT NULL constraint failed: users_new.is_admin` 로 죽었다.
+            # 컬럼을 명시하면 순서와 무관해진다.
+            # ⚠️ 재구축 동안 FK 를 끈다. `dispatches.user_id`·`memories.user_id` 가 `users` 를
+            # 참조하므로, `PRAGMA foreign_keys=ON`(__init__ 에서 켠다) 상태로 DROP 하면
+            # **FOREIGN KEY constraint failed** 로 죽는다 — 발송 이력이 있는 실제 DB 는 전부 해당.
+            # SQLite 공식 테이블 재구축 절차대로 OFF → 트랜잭션 → ON 순서로 한다
+            # (PRAGMA 는 트랜잭션 안에서 무시되므로 반드시 밖에서 켜고 꺼야 한다).
+            self.conn.execute("PRAGMA foreign_keys=OFF")
+            # DROP IF EXISTS + 트랜잭션: **재시작 가능해야 한다.** 예전엔 executescript 가
+            # 문장별로 적용돼(암묵 커밋) 중간에 죽으면 `users_new` 가 남았고, 다음 실행이
+            # "table users_new already exists" 로 막혀 **DB 가 영영 못 열렸다**(실측).
             self.conn.executescript("""
+                BEGIN;
+                DROP TABLE IF EXISTS users_new;
                 CREATE TABLE users_new (
                     id           INTEGER PRIMARY KEY AUTOINCREMENT,
                     telegram_chat_id TEXT UNIQUE,
@@ -138,10 +160,24 @@ class Database:
                     created_at   TEXT NOT NULL,
                     updated_at   TEXT NOT NULL
                 );
-                INSERT INTO users_new SELECT * FROM users;
+                INSERT INTO users_new
+                    (id, telegram_chat_id, username, display_name, email,
+                     is_active, is_admin, keywords, created_at, updated_at)
+                SELECT id, telegram_chat_id, username, display_name, email,
+                       is_active, is_admin, keywords, created_at, updated_at
+                  FROM users;
                 DROP TABLE users;
                 ALTER TABLE users_new RENAME TO users;
+                COMMIT;
             """)
+            self.conn.commit()
+            self.conn.execute("PRAGMA foreign_keys=ON")
+            # 재구축이 참조 무결성을 깨뜨리지 않았는지 확인한다 — FK 를 껐으니 스스로 검사한다.
+            orphans = self.conn.execute("PRAGMA foreign_key_check").fetchall()
+            if orphans:
+                raise RuntimeError(
+                    f"users 테이블 재구축 후 참조 무결성 위반 {len(orphans)}건: {orphans[:3]}"
+                )
 
         # Migrate: add notify_telegram, notify_email columns
         user_cols = [row[1] for row in self.conn.execute("PRAGMA table_info(users)")]  # refresh after possible table rebuild

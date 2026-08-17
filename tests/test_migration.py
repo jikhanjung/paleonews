@@ -263,3 +263,181 @@ def test_migration_idempotent():
     cols = [row[1] for row in db.conn.execute("PRAGMA table_info(dispatches)")]
     assert cols.count("user_id") == 1  # not duplicated
     db.close()
+
+
+# --- 레거시 chat_id 스키마 (Phase 4 이전) ------------------------------------
+
+def _legacy_chat_id_db(path: str) -> sqlite3.Connection:
+    """Phase 4 이전 스키마 — `chat_id` NOT NULL, `email`·notify_* 없음."""
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE users (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id      TEXT UNIQUE NOT NULL,
+            username     TEXT,
+            display_name TEXT,
+            is_active    BOOLEAN NOT NULL DEFAULT 1,
+            is_admin     BOOLEAN NOT NULL DEFAULT 0,
+            keywords     TEXT,
+            created_at   TEXT NOT NULL,
+            updated_at   TEXT NOT NULL
+        );
+        INSERT INTO users (chat_id, username, is_active, is_admin, keywords,
+                           created_at, updated_at)
+        VALUES ('123', '관리자', 1, 1, NULL, '2026-01-01', '2026-01-01');
+    """)
+    conn.commit()
+    return conn
+
+
+def test_migrate_legacy_schema_with_referencing_rows(tmp_path):
+    """`users` 를 참조하는 행이 있어도 재구축이 완주해야 한다.
+
+    회귀: `dispatches.user_id`·`memories.user_id` 가 users 를 참조하는데
+    `PRAGMA foreign_keys=ON` 상태로 테이블을 갈아끼워 **FOREIGN KEY constraint failed** 로 죽었다.
+    발송 이력이 있는 **실제 운영 DB 는 전부 여기 걸린다** — 앞의 테스트들은 참조 표가 없어 못 잡았다.
+    """
+    path = str(tmp_path / "refs.db")
+    conn = _legacy_chat_id_db(path)
+    conn.executescript("""
+        CREATE TABLE articles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT UNIQUE NOT NULL,
+            title TEXT NOT NULL, fetched_at TEXT NOT NULL
+        );
+        INSERT INTO articles (url, title, fetched_at)
+        VALUES ('https://example.com/1', 'T', '2026-01-01');
+        CREATE TABLE dispatches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            article_id INTEGER NOT NULL REFERENCES articles(id),
+            channel TEXT NOT NULL, sent_at TEXT NOT NULL, status TEXT NOT NULL,
+            user_id INTEGER REFERENCES users(id)
+        );
+        INSERT INTO dispatches (article_id, channel, sent_at, status, user_id)
+        VALUES (1, 'telegram', '2026-01-01', 'success', 1);
+        CREATE TABLE memories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            content TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        INSERT INTO memories (user_id, content, created_at)
+        VALUES (1, '메모', '2026-01-01');
+    """)
+    conn.commit()
+    conn.close()
+
+    db = Database(path)
+    db.init_tables()
+
+    cols = {row[1]: row for row in db.conn.execute("PRAGMA table_info(users)")}
+    assert not cols["telegram_chat_id"][3]
+    # 참조가 살아 있어야 한다 — user_id 가 고아가 되면 발송 이력·메모가 끊긴다.
+    assert db.conn.execute("SELECT user_id FROM dispatches").fetchone()[0] == 1
+    assert db.conn.execute("SELECT user_id FROM memories").fetchone()[0] == 1
+    assert not db.conn.execute("PRAGMA foreign_key_check").fetchall()
+    # 재구축 뒤에도 FK 강제가 다시 켜져 있어야 한다.
+    assert db.conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    db.close()
+
+
+def test_migrate_legacy_chat_id_schema(tmp_path):
+    """레거시 DB 를 열어도 마이그레이션이 완주해야 한다.
+
+    회귀: `email` 은 이 마이그레이션 직전에 **맨 뒤로** 추가되는데 재구축 테이블은 5번째로
+    선언한다. `INSERT ... SELECT *` 였을 땐 순서가 어긋나 `keywords`(NULL)가 `is_admin`
+    (NOT NULL) 자리로 들어가 죽었다 — 즉 **오래된 백업으로는 복구가 불가능했다.**
+    """
+    path = str(tmp_path / "legacy.db")
+    _legacy_chat_id_db(path).close()
+
+    db = Database(path)
+    db.init_tables()
+
+    cols = {row[1]: row for row in db.conn.execute("PRAGMA table_info(users)")}
+    assert "telegram_chat_id" in cols and "chat_id" not in cols
+    assert not cols["telegram_chat_id"][3], "telegram_chat_id 의 NOT NULL 이 안 풀렸다"
+    assert {"email", "notify_telegram", "notify_email"} <= set(cols)
+
+    row = db.conn.execute(
+        "SELECT telegram_chat_id, username, is_active, is_admin, keywords FROM users"
+    ).fetchone()
+    assert tuple(row) == ("123", "관리자", 1, 1, None), "컬럼이 어긋나 값이 밀렸다"
+    db.close()
+
+
+def test_migrate_repairs_half_migrated_users_table(tmp_path):
+    """rename 만 되고 재구축이 실패해 NOT NULL 이 남은 DB 도 복구된다.
+
+    rename 은 자체 커밋이라, 예전엔 재구축이 실패하면 다음 실행에서 `chat_id` 가 이미 없어
+    분기를 건너뛰고 **NOT NULL 인 채 영영 굳었다**(이메일 전용 사용자를 못 만든다).
+    """
+    path = str(tmp_path / "half.db")
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE users (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_chat_id TEXT UNIQUE NOT NULL,
+            username     TEXT,
+            display_name TEXT,
+            is_active    BOOLEAN NOT NULL DEFAULT 1,
+            is_admin     BOOLEAN NOT NULL DEFAULT 0,
+            keywords     TEXT,
+            created_at   TEXT NOT NULL,
+            updated_at   TEXT NOT NULL
+        , email TEXT);
+        INSERT INTO users (telegram_chat_id, username, is_active, is_admin,
+                           created_at, updated_at)
+        VALUES ('456', '구독자', 1, 0, '2026-01-01', '2026-01-01');
+    """)
+    conn.commit()
+    conn.close()
+
+    db = Database(path)
+    db.init_tables()
+
+    cols = {row[1]: row for row in db.conn.execute("PRAGMA table_info(users)")}
+    assert not cols["telegram_chat_id"][3], "NOT NULL 이 그대로 남았다"
+    # 이메일 전용 사용자(telegram_chat_id 없음)를 만들 수 있어야 한다.
+    uid = db.add_user(telegram_chat_id=None, username="이메일만", email="x@example.com")
+    assert db.get_user(uid)["telegram_chat_id"] is None
+    db.close()
+
+
+def test_migrate_restarts_after_crashed_rebuild(tmp_path):
+    """재구축이 중간에 죽어 `users_new` 가 남아 있어도 다시 열 수 있어야 한다.
+
+    회귀: executescript 는 문장별로 적용돼(암묵 커밋) 중간 실패 시 `users_new` 가 남았고,
+    다음 실행이 "table users_new already exists" 로 막혀 **DB 를 영영 못 열었다.**
+    복구 시나리오에서 이건 치명적이다 — 백업이 있어도 열리지 않는다.
+    """
+    path = str(tmp_path / "crashed.db")
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE users (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_chat_id TEXT UNIQUE NOT NULL,
+            username     TEXT,
+            display_name TEXT,
+            is_active    BOOLEAN NOT NULL DEFAULT 1,
+            is_admin     BOOLEAN NOT NULL DEFAULT 0,
+            keywords     TEXT,
+            created_at   TEXT NOT NULL,
+            updated_at   TEXT NOT NULL
+        , email TEXT);
+        INSERT INTO users (telegram_chat_id, is_active, is_admin, created_at, updated_at)
+        VALUES ('789', 1, 0, '2026-01-01', '2026-01-01');
+        -- 죽은 재구축이 남긴 잔재
+        CREATE TABLE users_new (id INTEGER PRIMARY KEY AUTOINCREMENT);
+    """)
+    conn.commit()
+    conn.close()
+
+    db = Database(path)
+    db.init_tables()          # 여기서 터지면 안 된다
+
+    cols = {row[1]: row for row in db.conn.execute("PRAGMA table_info(users)")}
+    assert not cols["telegram_chat_id"][3]
+    assert db.conn.execute("SELECT telegram_chat_id FROM users").fetchone()[0] == "789"
+    leftovers = db.conn.execute(
+        "SELECT name FROM sqlite_master WHERE name = 'users_new'").fetchall()
+    assert not leftovers, "재구축 잔재가 남았다"
+    db.close()
