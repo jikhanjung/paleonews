@@ -86,3 +86,48 @@ def test_filter_applies_to_third_party_logger_with_lazy_args():
 def test_filter_keeps_normal_records_formatted():
     out = _capture("paleonews", "Imported %d feeds", 3)
     assert "Imported 3 feeds" in out
+
+
+# --- Django 로깅 설정에도 붙어 있는가 (0.3.7 회귀) --------------------------
+
+def test_django_logging_attaches_redactor_to_every_handler():
+    """`manage.py bot`·gunicorn 은 Django LOGGING 을 쓴다 — 여기 빠지면 마스킹이 통째로 사라진다.
+
+    회귀(0.3.7): FastAPI→Django 전환 때 Django LOGGING 이 CLI 의 `setup_logging()` 을 밀어내,
+    배포 직후 봇 폴링 로그에 텔레그램 토큰이 **다시 평문으로** 찍혔다.
+    """
+    from config import settings as dj
+
+    assert "redact" in dj.LOGGING.get("filters", {}), "LOGGING 에 redact 필터가 없다"
+    assert dj.LOGGING["filters"]["redact"]["()"].endswith("RedactingFilter")
+    handlers = dj.LOGGING["handlers"]
+    assert handlers, "핸들러가 하나도 없다"
+    for name, handler in handlers.items():
+        assert "redact" in handler.get("filters", []), f"핸들러 '{name}' 에 redact 가 안 붙었다"
+
+
+def test_django_logging_config_actually_redacts():
+    """설정을 실제로 적용해 httpx 레코드가 마스킹되는지 본다(선언만으로는 부족하다)."""
+    import io
+    import logging.config
+
+    from config import settings as dj
+
+    buf = io.StringIO()
+    config = {**dj.LOGGING,
+              "handlers": {"console": {**dj.LOGGING["handlers"]["console"],
+                                       "class": "logging.StreamHandler",
+                                       "stream": buf}}}
+    saved = logging.getLogger().handlers, logging.getLogger().level
+    try:
+        logging.config.dictConfig(config)
+        logging.getLogger("httpx").info(
+            'HTTP Request: %s %s "%s"', "POST",
+            f"https://api.telegram.org/bot8042989190:{TOKEN_BODY}/getUpdates", "HTTP/1.1 200 OK")
+    finally:
+        logging.getLogger().handlers, _ = saved
+        logging.getLogger().setLevel(saved[1])
+
+    out = buf.getvalue()
+    assert TOKEN_BODY not in out
+    assert "bot8042989190:<redacted>" in out

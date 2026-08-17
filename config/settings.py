@@ -123,10 +123,18 @@ DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
 
 LOGIN_URL = "/admin/login/"
 
+# ⚠️ **리댁션 필터는 반드시 핸들러에 붙는다** (0.3.2 의 교훈, 0.3.7 에서 한 번 되돌아갔다).
+# python-telegram-bot 은 httpx 를 쓰고 httpx 는 요청 URL 을 INFO 로 찍는데, Telegram 은 토큰을
+# URL **경로**에 담는다 → 봇 폴링마다(10초 주기) 토큰이 평문으로 로그에 남는다.
+# CLI 는 `__main__.setup_logging()` 에서 붙이지만 `manage.py bot`·gunicorn 은 이 설정을 쓰므로,
+# 여기 빠지면 **Django 로 돌리는 모든 프로세스에서 마스킹이 사라진다**(실측: 0.3.7 배포 직후
+# 토큰이 다시 평문으로 찍혔다). 로거 이름이 아니라 **핸들러**에 붙여야 서드파티까지 덮는다.
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {"plain": {"format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s"}},
-    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "plain"}},
+    "filters": {"redact": {"()": "paleonews.log_redact.RedactingFilter"}},
+    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "plain",
+                             "filters": ["redact"]}},
     "root": {"handlers": ["console"], "level": "INFO"},
 }
