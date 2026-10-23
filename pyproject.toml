@@ -9,6 +9,7 @@ dependencies = [
     "gunicorn>=25",
     "feedparser",
     "httpx",
+    "certifi>=2026.10.19",  # emSign ECC Root CA - G3 removed (GHSA-6q48-6c7w-9gw2)
     "anthropic",
     "openai",
     "python-telegram-bot",
