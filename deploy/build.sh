@@ -55,7 +55,7 @@ fi
 
 echo ""
 echo "=== [3/4] Building image $IMAGE:$VERSION ==="
-docker build -f deploy/Dockerfile -t "$IMAGE:$VERSION" -t "$IMAGE:latest" .
+docker build --pull -f deploy/Dockerfile -t "$IMAGE:$VERSION" -t "$IMAGE:latest" .
 
 echo ""
 echo "=== [4/4] Pushing image ==="
