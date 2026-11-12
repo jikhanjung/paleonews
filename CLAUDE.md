@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Shared guides (`.guides`)
+Web deployment, data-safety and operations conventions: `.guides/web/README.md`; branding: `.guides/branding.md`. `.guides` is a local relative symlink to `../devdocs/guides` (gitignored).
+If it is missing or broken, the sibling devdocs checkout is absent — devdocs is private and this repo is public, so **never commit the guides here.**
+
 ## Project Overview
 
 고생물학 뉴스 집계 시스템. RSS 피드에서 기사를 수집 → 키워드+LLM 필터링 → 본문 크롤링 → Claude API로 한국어 요약 → Telegram/Email/Slack/Discord로 전송하는 자동화 파이프라인.

@@ -9,3 +9,6 @@ build/
 .pytest_cache/
 logs/
 staticfiles/
+
+# shared guides: local symlink to ../devdocs/guides (devdocs is private)
+.guides
